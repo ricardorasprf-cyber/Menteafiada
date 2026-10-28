@@ -33,10 +33,25 @@ function GamePlayContent() {
   const [timeLeft, setTimeLeft] = useState(15);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [soundEnabled, setSoundEnabled] = useState(true);
 
   const [showPodium3, setShowPodium3] = useState(false);
   const [showPodium2, setShowPodium2] = useState(false);
   const [showPodium1, setShowPodium1] = useState(false);
+
+  // Inicializar preferência de áudio local
+  useEffect(() => {
+    const savedSfx = localStorage.getItem("sfx_enabled");
+    if (savedSfx !== null) {
+      setSoundEnabled(savedSfx !== "false");
+    }
+  }, []);
+
+  const toggleSound = () => {
+    const nextState = !soundEnabled;
+    setSoundEnabled(nextState);
+    localStorage.setItem("sfx_enabled", nextState ? "true" : "false");
+  };
 
   useEffect(() => {
     const fetchUserRole = async () => {
@@ -54,8 +69,10 @@ function GamePlayContent() {
     fetchUserRole();
   }, [user]);
 
+  // Efeitos ao finalizar o jogo: Pódio + Fanfarra + Confetes
   useEffect(() => {
     if (session?.status === "FINALIZADO") {
+      playSoundEffect("VICTORY");
       setTimeout(() => setShowPodium3(true), 800);
       setTimeout(() => setShowPodium2(true), 2200);
       setTimeout(() => {
@@ -80,15 +97,39 @@ function GamePlayContent() {
     }, 250);
   };
 
+  // Motor Procedural de Efeitos Sonoros via Web Audio API
   const playSoundEffect = (type) => {
     try {
-      const sfxEnabled = localStorage.getItem("sfx_enabled") !== "false";
-      if (!sfxEnabled) return;
+      if (!soundEnabled) return;
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
       const ctx = new AudioCtx();
+      if (ctx.state === "suspended") ctx.resume();
 
-      if (type === "CORRECT") {
+      if (type === "CLICK") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(450, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.04);
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.04);
+      } else if (type === "COUNTDOWN") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.07);
+      } else if (type === "CORRECT") {
         const notes = [523.25, 659.25, 783.99];
         notes.forEach((freq, idx) => {
           const osc = ctx.createOscillator();
@@ -107,7 +148,7 @@ function GamePlayContent() {
         const gain = ctx.createGain();
         osc.type = "sawtooth";
         osc.frequency.setValueAtTime(160, ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.3);
+        osc.frequency.exponentialRampToValueAtTime(70, ctx.currentTime + 0.3);
         gain.gain.setValueAtTime(0.2, ctx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
         osc.connect(gain);
@@ -128,9 +169,33 @@ function GamePlayContent() {
           osc.start(ctx.currentTime + idx * 0.06);
           osc.stop(ctx.currentTime + idx * 0.06 + 0.25);
         });
+      } else if (type === "VICTORY") {
+        const fanfare = [
+          { f: 523.25, d: 0.12 },
+          { f: 523.25, d: 0.12 },
+          { f: 523.25, d: 0.12 },
+          { f: 659.25, d: 0.35 },
+          { f: 587.33, d: 0.15 },
+          { f: 659.25, d: 0.15 },
+          { f: 783.99, d: 0.55 },
+        ];
+        let start = ctx.currentTime;
+        fanfare.forEach((item) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "triangle";
+          osc.frequency.setValueAtTime(item.f, start);
+          gain.gain.setValueAtTime(0.18, start);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + item.d);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(start);
+          osc.stop(start + item.d);
+          start += item.d + 0.03;
+        });
       }
     } catch (e) {
-      console.log("Áudio não suportado.");
+      console.log("Áudio não suportado ou bloqueado pelo navegador.");
     }
   };
 
@@ -221,17 +286,27 @@ function GamePlayContent() {
       .subscribe();
   };
 
+  // Cronômetro regressivo com bip sonoro nos últimos 5 segundos
   useEffect(() => {
     let interval = null;
     if (session?.time_state === "RODANDO" && timeLeft > 0 && !hasAnswered) {
-      interval = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
+      interval = setInterval(() => {
+        setTimeLeft((prev) => {
+          const nextVal = prev - 1;
+          if (nextVal <= 5 && nextVal > 0) {
+            playSoundEffect("COUNTDOWN");
+          }
+          return nextVal;
+        });
+      }, 1000);
     }
     return () => clearInterval(interval);
-  }, [session?.time_state, timeLeft, hasAnswered]);
+  }, [session?.time_state, timeLeft, hasAnswered, soundEnabled]);
 
   const handleSelectOption = async (optionIdx) => {
     if (hasAnswered || session?.time_state !== "RODANDO") return;
 
+    playSoundEffect("CLICK");
     setSelectedOption(optionIdx);
     setHasAnswered(true);
 
@@ -305,6 +380,13 @@ function GamePlayContent() {
               </Link>
 
               <nav className="flex items-center gap-3">
+                <button
+                  onClick={toggleSound}
+                  className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border border-slate-700 transition cursor-pointer"
+                  title="Ativar/Desativar Som"
+                >
+                  {soundEnabled ? "🔊" : "🔇"}
+                </button>
                 <LanguageSelector />
                 {user && <UserMenu userName={user.firstName || "Aluno"} userRole={userRole} />}
               </nav>
@@ -346,9 +428,9 @@ function GamePlayContent() {
                   <span className="text-[var(--foreground)] opacity-70">
                     {t("question")} {(session.current_question_index || 0) + 1} {t("of")} {questions.length}
                   </span>
-                  <div className="flex items-center gap-1.5 bg-[var(--background)] border border-[var(--card-border)] px-3 py-1 rounded-full shadow-sm">
+                  <div className={`flex items-center gap-1.5 bg-[var(--background)] border border-[var(--card-border)] px-3 py-1 rounded-full shadow-sm transition-all ${timeLeft <= 5 ? "border-rose-500 scale-105 animate-pulse" : ""}`}>
                     <span>⏱️</span>
-                    <span className="font-mono text-amber-500 font-extrabold text-sm">{timeLeft}s</span>
+                    <span className={`font-mono font-extrabold text-sm ${timeLeft <= 5 ? "text-rose-500" : "text-amber-500"}`}>{timeLeft}s</span>
                   </div>
                 </div>
 
@@ -378,8 +460,8 @@ function GamePlayContent() {
                         key={i}
                         disabled={hasAnswered || session.time_state !== "RODANDO"}
                         onClick={() => handleSelectOption(i)}
-                        className={`w-full p-4 font-bold rounded-2xl text-left text-sm transition flex items-center justify-between cursor-pointer text-white shadow-md ${colors[i % 4]} ${
-                          hasAnswered || session.time_state !== "RODANDO" ? "opacity-60 cursor-not-allowed" : ""
+                        className={`w-full p-4 font-bold rounded-2xl text-left text-sm transition-all flex items-center justify-between cursor-pointer text-white shadow-md ${colors[i % 4]} ${
+                          hasAnswered || session.time_state !== "RODANDO" ? "opacity-60 cursor-not-allowed" : "active:scale-95"
                         } ${isSelected ? "ring-4 ring-white scale-[1.02]" : ""}`}
                       >
                         <span>
@@ -429,7 +511,11 @@ function GamePlayContent() {
                   {rankedPlayers.slice(0, 3).map((p, idx) => (
                     <div
                       key={p.id}
-                      className="p-3 bg-[var(--background)] border border-[var(--card-border)] rounded-xl flex justify-between items-center text-xs font-semibold shadow-sm"
+                      className={`p-3 bg-[var(--background)] border border-[var(--card-border)] rounded-xl flex justify-between items-center text-xs font-semibold shadow-sm transition-all duration-500 ${
+                        idx === 2 && !showPodium3 ? "opacity-0 translate-y-2" : ""
+                      } ${idx === 1 && !showPodium2 ? "opacity-0 translate-y-2" : ""} ${
+                        idx === 0 && !showPodium1 ? "opacity-0 scale-95" : "scale-100 opacity-100"
+                      }`}
                     >
                       <span className="text-[var(--foreground)]">
                         {idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉"} {p.player_name}
@@ -461,6 +547,13 @@ function GamePlayContent() {
             </Link>
 
             <nav className="flex items-center gap-3">
+              <button
+                onClick={toggleSound}
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border border-slate-700 transition cursor-pointer"
+                title="Ativar/Desativar Som"
+              >
+                {soundEnabled ? "🔊" : "🔇"}
+              </button>
               <LanguageSelector />
               {user && <UserMenu userName={user.firstName || "Aluno"} userRole={userRole} />}
             </nav>

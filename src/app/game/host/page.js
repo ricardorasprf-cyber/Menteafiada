@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useUser } from "@clerk/nextjs";
@@ -34,24 +36,102 @@ export default function HostGamePage() {
   const [isSpinning, setIsSpinning] = useState(false);
   const [hideNames, setHideNames] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Estados para Animação Sequencial do Pódio
   const [showPodium3, setShowPodium3] = useState(false);
   const [showPodium2, setShowPodium2] = useState(false);
   const [showPodium1, setShowPodium1] = useState(false);
 
+  // Inicializar preferência de áudio
+  useEffect(() => {
+    const savedSfx = localStorage.getItem("sfx_enabled");
+    if (savedSfx !== null) {
+      setSoundEnabled(savedSfx !== "false");
+    }
+  }, []);
+
+  const toggleSound = () => {
+    const nextState = !soundEnabled;
+    setSoundEnabled(nextState);
+    localStorage.setItem("sfx_enabled", nextState ? "true" : "false");
+  };
+
+  // Motor Procedural de Efeitos Sonoros via Web Audio API
+  const playSoundEffect = (type) => {
+    try {
+      if (!soundEnabled) return;
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      if (ctx.state === "suspended") ctx.resume();
+
+      if (type === "COUNTDOWN") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.08);
+      } else if (type === "NEXT_QUESTION") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.15);
+      } else if (type === "VICTORY") {
+        const fanfare = [
+          { f: 523.25, d: 0.12 },
+          { f: 523.25, d: 0.12 },
+          { f: 523.25, d: 0.12 },
+          { f: 659.25, d: 0.35 },
+          { f: 587.33, d: 0.15 },
+          { f: 659.25, d: 0.15 },
+          { f: 783.99, d: 0.55 },
+        ];
+        let start = ctx.currentTime;
+        fanfare.forEach((item) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "triangle";
+          osc.frequency.setValueAtTime(item.f, start);
+          gain.gain.setValueAtTime(0.18, start);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + item.d);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(start);
+          osc.stop(start + item.d);
+          start += item.d + 0.03;
+        });
+      }
+    } catch (e) {
+      console.log("Áudio não suportado ou bloqueado.");
+    }
+  };
+
   useEffect(() => {
     fetchQuizzes();
   }, [user]);
 
-  // Efeito para acionar a Animação do Pódio + Confetes de 20 segundos
+  // Efeito para acionar a Animação do Pódio + Fanfarra + Confetes de 20 segundos
   useEffect(() => {
     if (session?.status === "FINALIZADO") {
-      setTimeout(() => setShowPodium3(true), 800);   // 3º Lugar
-      setTimeout(() => setShowPodium2(true), 2200);  // 2º Lugar
+      playSoundEffect("VICTORY");
+      setTimeout(() => setShowPodium3(true), 800);
+      setTimeout(() => setShowPodium2(true), 2200);
       setTimeout(() => {
-        setShowPodium1(true);                        // 1º Lugar
-        dispararConfetes20s();                       // Inicia confetes por 20s
+        setShowPodium1(true);
+        dispararConfetes20s();
       }, 3800);
     }
   }, [session?.status]);
@@ -155,6 +235,7 @@ export default function HostGamePage() {
 
   const handleStartGame = async () => {
     if (!session) return;
+    playSoundEffect("NEXT_QUESTION");
     const { data } = await supabase.from("game_sessions").update({ status: "EM_ANDAMENTO", current_question_index: 0, time_state: "PAUSADO" }).eq("id", session.id).select().single();
     if (data) setSession(data);
   };
@@ -165,15 +246,24 @@ export default function HostGamePage() {
     await supabase.from("game_sessions").update({ time_state: newState }).eq("id", session.id);
   };
 
+  // Cronómetro com contagem decrescente sonora nos últimos 5 segundos
   useEffect(() => {
     let interval = null;
     if (timeState === "RODANDO" && timer > 0) {
-      interval = setInterval(() => setTimer((prev) => prev - 1), 1000);
+      interval = setInterval(() => {
+        setTimer((prev) => {
+          const nextVal = prev - 1;
+          if (nextVal <= 5 && nextVal > 0) {
+            playSoundEffect("COUNTDOWN");
+          }
+          return nextVal;
+        });
+      }, 1000);
     } else if (timer === 0) {
       setTimeState("PAUSADO");
     }
     return () => clearInterval(interval);
-  }, [timeState, timer]);
+  }, [timeState, timer, soundEnabled]);
 
   const handleNextQuestion = async () => {
     const nextIdx = currentQuestionIndex + 1;
@@ -183,6 +273,7 @@ export default function HostGamePage() {
       return;
     }
 
+    playSoundEffect("NEXT_QUESTION");
     const nextTime = questions[nextIdx]?.time_seconds || 15;
     setCurrentQuestionIndex(nextIdx);
     setTimer(nextTime);
@@ -252,6 +343,13 @@ export default function HostGamePage() {
             </Link>
             
             <nav className="flex items-center gap-3">
+              <button
+                onClick={toggleSound}
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border border-slate-700 transition cursor-pointer"
+                title="Ativar/Desativar Som"
+              >
+                {soundEnabled ? "🔊" : "🔇"}
+              </button>
               <LanguageSelector />
               <UserMenu userName={user?.firstName || t("professor_label")} userRole="creator" />
             </nav>
@@ -385,7 +483,7 @@ export default function HostGamePage() {
                   🔲 {t("entry_btn")}
                 </button>
                 <button onClick={toggleTimeState} className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-xs rounded-lg transition flex items-center gap-1 cursor-pointer">
-                  ▶ {t("play_btn")}
+                  {timeState === "RODANDO" ? "⏸" : "▶"} {t("play_btn")}
                 </button>
                 <button onClick={handleNextQuestion} className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs rounded-lg transition flex items-center gap-1 cursor-pointer">
                   ⏩ {t("next_btn")}
@@ -416,7 +514,7 @@ export default function HostGamePage() {
                   <span className="text-[var(--foreground)] font-bold opacity-80">{t("time_adjustment")}</span>
                   <div className="flex items-center gap-2">
                     <button onClick={() => setTimer((prev) => Math.max(5, prev - 5))} className="px-3 py-1 bg-[var(--card-bg)] hover:opacity-80 text-[var(--foreground)] font-bold rounded-lg border border-[var(--card-border)] cursor-pointer">-5s</button>
-                    <span className="font-mono text-purple-500 font-bold px-1 text-sm">{timer}s</span>
+                    <span className={`font-mono font-bold px-1 text-sm ${timer <= 5 ? "text-rose-500 animate-pulse" : "text-purple-500"}`}>{timer}s</span>
                     <button onClick={() => setTimer((prev) => prev + 5)} className="px-3 py-1 bg-[var(--card-bg)] hover:opacity-80 text-[var(--foreground)] font-bold rounded-lg border border-[var(--card-border)] cursor-pointer">+5s</button>
                   </div>
                 </div>
@@ -484,7 +582,10 @@ export default function HostGamePage() {
         {/* CARTÃO DA PERGUNTA NO HOST */}
         {session && session.status === "EM_ANDAMENTO" && questions[currentQuestionIndex] && (
           <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl p-6 shadow-xl space-y-4 transition-colors duration-300">
-            <span className="text-xs font-bold text-[var(--foreground)] opacity-50 uppercase tracking-widest">{t("question")} {currentQuestionIndex + 1} {t("of")} {questions.length}</span>
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-bold text-[var(--foreground)] opacity-50 uppercase tracking-widest">{t("question")} {currentQuestionIndex + 1} {t("of")} {questions.length}</span>
+              <span className={`font-mono font-bold text-xs px-2.5 py-1 rounded-full border ${timer <= 5 ? "border-rose-500 text-rose-500 animate-pulse" : "border-[var(--card-border)] text-[var(--foreground)]"}`}>⏱️ {timer}s</span>
+            </div>
             <h2 className="text-xl font-bold text-[var(--foreground)]">{questions[currentQuestionIndex].question_text}</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {questions[currentQuestionIndex].options.map((opt, i) => (
