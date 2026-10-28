@@ -1,5 +1,6 @@
 "use client";
 
+export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -9,6 +10,7 @@ import UserMenu from "@/app/components/UserMenu";
 import LanguageSelector from "@/app/components/LanguageSelector"; // Importação do Seletor
 import { useLanguage } from "@/contexts/LanguageContext"; // Importação do Contexto
 import confetti from "canvas-confetti";
+import { Suspense } from "react";
 
 export default function PlayGamePage() {
   const searchParams = useSearchParams();
@@ -498,5 +500,21 @@ export default function PlayGamePage() {
         © {new Date().getFullYear()} MenteAfiada Realtime Quiz Engine.
       </footer>
     </div>
+  );
+}
+function GamePlayContent() {
+  // O seu código atual da página /game/play (com useSearchParams, estados, etc.)
+  return (
+    <div>
+      {/* ... */}
+    </div>
+  );
+}
+
+export default function GamePlayPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-white">A carregar jogo...</div>}>
+      <GamePlayContent />
+    </Suspense>
   );
 }
