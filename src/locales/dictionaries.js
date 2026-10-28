@@ -148,6 +148,7 @@ export const dictionaries = {
     quick_how_to_create: "Como criar uma sala?",
     quick_my_courses: "Onde vejo meus cursos?",
     clear_chat: "Limpar conversa",
+    my_achievements: "Minhas Conquistas",
 
     // Chaves para a página dashboard/participant (Meus Cursos)
     my_courses_page_title: "Meus Cursos",
@@ -196,6 +197,7 @@ export const dictionaries = {
     ready_desc: "Your study environment is ready and waiting for you.",
     btn_login: "Sign in with Google",
     btn_courses: "Go to My Courses",
+    my_achievements: "My Achievements",
 
     enter_quiz: "Join Quiz",
     connecting_pin: "Connecting to PIN",
@@ -369,6 +371,7 @@ export const dictionaries = {
     ready_desc: "Tu entorno de estudio ya está listo y esperándote.",
     btn_login: "Iniciar sesión con Google",
     btn_courses: "Ir a Mis Cursos",
+    my_achievements: "Mis Logros",
 
     enter_quiz: "Entrar al Quiz",
     connecting_pin: "Conectando al PIN",

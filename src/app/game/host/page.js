@@ -2,7 +2,8 @@
 
 export const dynamic = "force-dynamic";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
@@ -11,8 +12,9 @@ import LanguageSelector from "@/app/components/LanguageSelector";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { QRCodeSVG } from "qrcode.react";
 import confetti from "canvas-confetti";
+import ArenaChat from "@/app/components/ArenaChat";
 
-export default function HostGamePage() {
+function HostGameContent() {
   const { user } = useUser();
   const { t } = useLanguage();
 
@@ -24,6 +26,7 @@ export default function HostGamePage() {
   const [questions, setQuestions] = useState([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState([]);
+  const [isPublic, setIsPublic] = useState(false); // Flag de Sala Pública na Arena
 
   // Estados da Interface do Painel
   const [loading, setLoading] = useState(false);
@@ -37,6 +40,11 @@ export default function HostGamePage() {
   const [hideNames, setHideNames] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
+
+  // Estados para Novo Quiz com a Mesma Turma
+  const [showNewQuizModal, setShowNewQuizModal] = useState(false);
+  const [nextQuizId, setNextQuizId] = useState("");
+  const [resetScores, setResetScores] = useState(false);
 
   // Estados para Animação Sequencial do Pódio
   const [showPodium3, setShowPodium3] = useState(false);
@@ -123,7 +131,7 @@ export default function HostGamePage() {
     fetchQuizzes();
   }, [user]);
 
-  // Efeito para acionar a Animação do Pódio + Fanfarra + Confetes de 20 segundos
+  // Efeito ao finalizar: pódio animado + fanfarra + confetes
   useEffect(() => {
     if (session?.status === "FINALIZADO") {
       playSoundEffect("VICTORY");
@@ -166,10 +174,12 @@ export default function HostGamePage() {
     if (data && data.length > 0) {
       setQuizzes(data);
       setSelectedQuizId(data[0].id);
+      setNextQuizId(data[0].id);
     } else {
       const defaultQuiz = [{ id: "11111111-1111-1111-1111-111111111111", title: "Conhecimentos Gerais - MenteAfiada" }];
       setQuizzes(defaultQuiz);
       setSelectedQuizId("11111111-1111-1111-1111-111111111111");
+      setNextQuizId("11111111-1111-1111-1111-111111111111");
     }
   };
 
@@ -202,7 +212,8 @@ export default function HostGamePage() {
         host_id: user?.id || "host-anonymous",
         status: "AGUARDANDO",
         time_left: initialTime,
-        time_state: "PAUSADO"
+        time_state: "PAUSADO",
+        is_public: isPublic
       })
       .select()
       .single();
@@ -233,6 +244,21 @@ export default function HostGamePage() {
       .subscribe();
   };
 
+  const handleKickPlayer = async (playerId, playerName) => {
+    if (!confirm(`Tem certeza que deseja remover "${playerName}" da sala?`)) return;
+
+    const { error } = await supabase
+      .from("game_players")
+      .delete()
+      .eq("id", playerId);
+
+    if (error) {
+      alert("Erro ao remover participante: " + error.message);
+    } else {
+      setPlayers((prev) => prev.filter((p) => p.id !== playerId));
+    }
+  };
+
   const handleStartGame = async () => {
     if (!session) return;
     playSoundEffect("NEXT_QUESTION");
@@ -246,7 +272,6 @@ export default function HostGamePage() {
     await supabase.from("game_sessions").update({ time_state: newState }).eq("id", session.id);
   };
 
-  // Cronómetro com contagem decrescente sonora nos últimos 5 segundos
   useEffect(() => {
     let interval = null;
     if (timeState === "RODANDO" && timer > 0) {
@@ -288,6 +313,72 @@ export default function HostGamePage() {
     setSession((prev) => ({ ...prev, status: "FINALIZADO" }));
   };
 
+  // INICIAR NOVO QUIZ COM OS MESMOS ALUNOS
+  const handleStartNextQuiz = async () => {
+    if (!nextQuizId) return alert("Selecione um quiz para continuar.");
+
+    setLoading(true);
+
+    let newQuestions = [];
+    const { data: qData } = await supabase
+      .from("questions")
+      .select("*")
+      .eq("quiz_id", nextQuizId)
+      .order("question_order", { ascending: true });
+
+    if (qData && qData.length > 0) {
+      newQuestions = qData;
+    } else {
+      newQuestions = [
+        { question_text: "Qual é a capital do Brasil?", options: ["São Paulo", "Rio de Janeiro", "Brasília", "Salvador"], correct_option: 2, time_seconds: 15 },
+        { question_text: "Quanto é 2 + 2 x 2?", options: ["8", "6", "4", "10"], correct_option: 1, time_seconds: 15 }
+      ];
+    }
+
+    setQuestions(newQuestions);
+    const initialTime = newQuestions[0]?.time_seconds || 15;
+
+    // Remove respostas anteriores desta sala
+    await supabase.from("player_answers").delete().eq("session_id", session.id);
+
+    // Zera os pontos se a opção estiver marcada
+    if (resetScores) {
+      await supabase.from("game_players").update({ score: 0 }).eq("session_id", session.id);
+      setPlayers((prev) => prev.map((p) => ({ ...p, score: 0 })));
+    }
+
+    // Reinicia a sessão com o novo quiz
+    const { data: updatedSession, error } = await supabase
+      .from("game_sessions")
+      .update({
+        quiz_id: nextQuizId === "11111111-1111-1111-1111-111111111111" ? null : nextQuizId,
+        status: "EM_ANDAMENTO",
+        current_question_index: 0,
+        time_left: initialTime,
+        time_state: "PAUSADO"
+      })
+      .eq("id", session.id)
+      .select()
+      .single();
+
+    if (error) {
+      alert("Erro ao iniciar nova rodada: " + error.message);
+    } else if (updatedSession) {
+      setSession(updatedSession);
+      setAnswers([]);
+      setCurrentQuestionIndex(0);
+      setTimer(initialTime);
+      setTimeState("PAUSADO");
+      setShowPodium1(false);
+      setShowPodium2(false);
+      setShowPodium3(false);
+      setShowNewQuizModal(false);
+      playSoundEffect("NEXT_QUESTION");
+    }
+
+    setLoading(false);
+  };
+
   const directGameLink = session ? `${typeof window !== "undefined" ? window.location.origin : ""}/game/play?pin=${session.pin}` : "";
 
   const copyToClipboard = () => {
@@ -326,11 +417,66 @@ export default function HostGamePage() {
 
   const rankedPlayers = [...players].sort((a, b) => (b.score || 0) - (a.score || 0));
 
+  const totalGlobalAnswers = answers.length;
+  const totalGlobalCorrect = answers.filter((a) => a.is_correct).length;
+  const classAccuracyRate = totalGlobalAnswers > 0 ? Math.round((totalGlobalCorrect / totalGlobalAnswers) * 100) : 0;
+
+  const questionAnalytics = questions.map((q, idx) => {
+    const qAnswers = answers.filter((a) => a.question_index === idx);
+    const qCorrect = qAnswers.filter((a) => a.is_correct).length;
+    const qTotal = qAnswers.length;
+    const accuracy = qTotal > 0 ? Math.round((qCorrect / qTotal) * 100) : 0;
+    const errorRate = 100 - accuracy;
+    return {
+      index: idx + 1,
+      text: q.question_text,
+      totalAnswers: qTotal,
+      correctCount: qCorrect,
+      errorCount: qTotal - qCorrect,
+      accuracy,
+      errorRate,
+    };
+  });
+
+  const questionsWithAnswers = questionAnalytics.filter((q) => q.totalAnswers > 0);
+  const hardestQuestion = questionsWithAnswers.length > 0 
+    ? [...questionsWithAnswers].sort((a, b) => b.errorRate - a.errorRate)[0] 
+    : null;
+  const easiestQuestion = questionsWithAnswers.length > 0 
+    ? [...questionsWithAnswers].sort((a, b) => a.errorRate - b.errorRate)[0] 
+    : null;
+
+  const handleExportCSV = () => {
+    if (players.length === 0) return alert("Não há alunos para exportar.");
+
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "Posicao;Nome do Aluno;Pontuacao;Acertos;Total Respondido;Taxa de Acerto\n";
+
+    rankedPlayers.forEach((p, idx) => {
+      const pAnswers = answers.filter((a) => a.player_id === p.id);
+      const pCorrect = pAnswers.filter((a) => a.is_correct).length;
+      const pRate = pAnswers.length > 0 ? Math.round((pCorrect / pAnswers.length) * 100) : 0;
+      csvContent += `${idx + 1};${p.player_name};${p.score || 0};${pCorrect};${pAnswers.length};${pRate}%\n`;
+    });
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `MenteAfiada_Relatorio_PIN_${session?.pin || "sessao"}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handlePrintPDF = () => {
+    window.print();
+  };
+
   return (
     <div className="min-h-screen bg-[var(--background)] font-sans text-[var(--foreground)] transition-colors duration-300">
       
-      {/* BLOCO SUPERIOR FIXO (Escuro Institucional) */}
-      <div className="bg-slate-900 border-b border-slate-800 pb-10 transition-none">
+      {/* BLOCO SUPERIOR FIXO */}
+      <div className="bg-slate-900 border-b border-slate-800 pb-10 transition-none print:hidden">
         <header className="py-4 px-6">
           <div className="max-w-7xl mx-auto flex items-center justify-between">
             <Link href="/" className="flex items-center gap-3">
@@ -388,7 +534,7 @@ export default function HostGamePage() {
         </div>
       </div>
 
-      {/* CONTEÚDO PRINCIPAL (Adaptável Claro/Escuro) */}
+      {/* CONTEÚDO PRINCIPAL */}
       <main className="max-w-4xl mx-auto px-6 py-10 relative z-10 space-y-8">
         
         {/* CRIAR SALA */}
@@ -407,6 +553,20 @@ export default function HostGamePage() {
                   <option key={q.id} value={q.id}>{q.title}</option>
                 ))}
               </select>
+
+              <div className="p-3 bg-[var(--background)] border border-[var(--card-border)] rounded-xl flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="arenaToggle"
+                  checked={isPublic}
+                  onChange={(e) => setIsPublic(e.target.checked)}
+                  className="w-4 h-4 text-purple-600 rounded cursor-pointer"
+                />
+                <label htmlFor="arenaToggle" className="text-xs font-bold text-[var(--foreground)] cursor-pointer select-none">
+                  ⚔️ Listar na Arena Pública (Qualquer usuário poderá entrar)
+                </label>
+              </div>
+
               <button onClick={handleCreateSession} disabled={loading} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-purple-600/20 transition cursor-pointer mt-2">
                 {loading ? t("creating_room") : `👑 ${t("create_new_room_btn")}`}
               </button>
@@ -419,7 +579,14 @@ export default function HostGamePage() {
           <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl p-6 shadow-xl space-y-6 transition-colors duration-300">
             <div className="flex flex-col sm:flex-row justify-between items-center gap-4 border-b border-[var(--card-border)] pb-6">
               <div>
-                <span className="text-xs text-[var(--foreground)] opacity-70 uppercase tracking-widest font-bold">{t("room_pin_code")}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[var(--foreground)] opacity-70 uppercase tracking-widest font-bold">{t("room_pin_code")}</span>
+                  {session.is_public && (
+                    <span className="text-[10px] bg-purple-500/20 text-purple-400 border border-purple-500/40 px-2 py-0.5 rounded-full font-bold">
+                      ⚔️ Arena Pública
+                    </span>
+                  )}
+                </div>
                 <h1 className="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-500 to-blue-500 font-mono tracking-widest mt-1">{session.pin}</h1>
               </div>
 
@@ -450,13 +617,25 @@ export default function HostGamePage() {
                   {players.length} {t("connected")}
                 </span>
               </div>
+              
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-h-60 overflow-y-auto">
                 {players.length === 0 ? (
                   <p className="col-span-full text-center text-[var(--foreground)] opacity-50 py-6 text-sm">{t("waiting_students")}</p>
                 ) : (
                   players.map((p) => (
-                    <div key={p.id} className="bg-[var(--background)] border border-[var(--card-border)] p-2.5 rounded-xl flex items-center gap-2 text-xs font-semibold text-[var(--foreground)] truncate shadow-sm">
-                      <span className="opacity-70">👤</span> {p.player_name}
+                    <div key={p.id} className="bg-[var(--background)] border border-[var(--card-border)] p-2.5 rounded-xl flex items-center justify-between text-xs font-semibold text-[var(--foreground)] truncate shadow-sm group hover:border-rose-500/40 transition">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="opacity-70">👤</span>
+                        <span className="truncate">{p.player_name}</span>
+                      </div>
+                      
+                      <button
+                        onClick={() => handleKickPlayer(p.id, p.player_name)}
+                        className="text-rose-500 hover:text-rose-700 hover:bg-rose-500/10 p-1 rounded-md opacity-60 hover:opacity-100 transition cursor-pointer ml-1"
+                        title="Expulsar da sala"
+                      >
+                        ✕
+                      </button>
                     </div>
                   ))
                 )}
@@ -598,69 +777,193 @@ export default function HostGamePage() {
           </div>
         )}
 
-        {/* PÓDIO FINAL ANIMADO */}
+        {/* PÓDIO FINAL ANIMADO & RELATÓRIO PÓS-JOGO */}
         {session && session.status === "FINALIZADO" && (
-          <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl p-8 shadow-xl text-center space-y-8 transition-colors duration-300 overflow-hidden">
-            <h1 className="text-3xl md:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-yellow-500 tracking-wider">🏆 {t("final_podium_title")} 🏆</h1>
+          <div className="space-y-8">
+            {/* PÓDIO TOP 3 */}
+            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl p-8 shadow-xl text-center space-y-8 transition-colors duration-300 overflow-hidden print:hidden">
+              <h1 className="text-3xl md:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-yellow-500 tracking-wider">🏆 {t("final_podium_title")} 🏆</h1>
 
-            <div className="flex justify-center items-end gap-2 md:gap-3 h-64 pt-6 px-2 md:px-4 border-b border-[var(--card-border)] pb-4 overflow-hidden">
-              
-              {/* 2º LUGAR */}
-              <div className={`w-1/3 flex flex-col items-center transition-all duration-700 transform ${showPodium2 ? "translate-y-0 opacity-100 scale-100" : "translate-y-full opacity-0 scale-95"}`}>
-                <span className="text-xs font-bold text-[var(--foreground)] truncate w-full mb-1">
-                  {rankedPlayers[1] ? rankedPlayers[1].player_name : "---"}
-                </span>
-                <span className="text-[10px] text-[var(--foreground)] opacity-70 font-mono font-bold mb-2">
-                  {rankedPlayers[1] ? rankedPlayers[1].score || 0 : 0} pts
-                </span>
-                <div className="w-full h-36 bg-gradient-to-t from-slate-400 to-slate-300 rounded-t-xl border-t-4 border-slate-200 flex items-center justify-center shadow-lg">
-                  <span className="text-3xl font-black text-slate-800">2º</span>
+              <div className="flex justify-center items-end gap-2 md:gap-3 h-64 pt-6 px-2 md:px-4 border-b border-[var(--card-border)] pb-4 overflow-hidden">
+                {/* 2º LUGAR */}
+                <div className={`w-1/3 flex flex-col items-center transition-all duration-700 transform ${showPodium2 ? "translate-y-0 opacity-100 scale-100" : "translate-y-full opacity-0 scale-95"}`}>
+                  <span className="text-xs font-bold text-[var(--foreground)] truncate w-full mb-1">
+                    {rankedPlayers[1] ? rankedPlayers[1].player_name : "---"}
+                  </span>
+                  <span className="text-[10px] text-[var(--foreground)] opacity-70 font-mono font-bold mb-2">
+                    {rankedPlayers[1] ? rankedPlayers[1].score || 0 : 0} pts
+                  </span>
+                  <div className="w-full h-36 bg-gradient-to-t from-slate-400 to-slate-300 rounded-t-xl border-t-4 border-slate-200 flex items-center justify-center shadow-lg">
+                    <span className="text-3xl font-black text-slate-800">2º</span>
+                  </div>
                 </div>
-              </div>
 
-              {/* 1º LUGAR */}
-              <div className={`w-1/3 flex flex-col items-center z-10 transition-all duration-700 transform ${showPodium1 ? "translate-y-0 opacity-100 scale-105" : "translate-y-full opacity-0 scale-95"}`}>
-                <span className="text-2xl mb-1 animate-bounce">👑</span>
-                <span className="text-sm font-black text-[var(--foreground)] truncate w-full mb-1">
-                  {rankedPlayers[0] ? rankedPlayers[0].player_name : "---"}
-                </span>
-                <span className="text-xs text-amber-500 font-mono font-bold mb-2">
-                  {rankedPlayers[0] ? rankedPlayers[0].score || 0 : 0} pts
-                </span>
-                <div className="w-full h-48 bg-gradient-to-t from-amber-500 to-yellow-400 rounded-t-2xl border-t-4 border-yellow-200 flex items-center justify-center shadow-2xl">
-                  <span className="text-4xl font-black text-slate-900">1º</span>
+                {/* 1º LUGAR */}
+                <div className={`w-1/3 flex flex-col items-center z-10 transition-all duration-700 transform ${showPodium1 ? "translate-y-0 opacity-100 scale-105" : "translate-y-full opacity-0 scale-95"}`}>
+                  <span className="text-2xl mb-1 animate-bounce">👑</span>
+                  <span className="text-sm font-black text-[var(--foreground)] truncate w-full mb-1">
+                    {rankedPlayers[0] ? rankedPlayers[0].player_name : "---"}
+                  </span>
+                  <span className="text-xs text-amber-500 font-mono font-bold mb-2">
+                    {rankedPlayers[0] ? rankedPlayers[0].score || 0 : 0} pts
+                  </span>
+                  <div className="w-full h-48 bg-gradient-to-t from-amber-500 to-yellow-400 rounded-t-2xl border-t-4 border-yellow-200 flex items-center justify-center shadow-2xl">
+                    <span className="text-4xl font-black text-slate-900">1º</span>
+                  </div>
                 </div>
-              </div>
 
-              {/* 3º LUGAR */}
-              <div className={`w-1/3 flex flex-col items-center transition-all duration-700 transform ${showPodium3 ? "translate-y-0 opacity-100 scale-100" : "translate-y-full opacity-0 scale-95"}`}>
-                <span className="text-xs font-bold text-[var(--foreground)] truncate w-full mb-1">
-                  {rankedPlayers[2] ? rankedPlayers[2].player_name : "---"}
-                </span>
-                <span className="text-[10px] text-[var(--foreground)] opacity-70 font-mono font-bold mb-2">
-                  {rankedPlayers[2] ? rankedPlayers[2].score || 0 : 0} pts
-                </span>
-                <div className="w-full h-28 bg-gradient-to-t from-amber-700 to-amber-600 rounded-t-xl border-t-4 border-amber-500 flex items-center justify-center shadow-lg">
-                  <span className="text-3xl font-black text-white">3º</span>
+                {/* 3º LUGAR */}
+                <div className={`w-1/3 flex flex-col items-center transition-all duration-700 transform ${showPodium3 ? "translate-y-0 opacity-100 scale-100" : "translate-y-full opacity-0 scale-95"}`}>
+                  <span className="text-xs font-bold text-[var(--foreground)] truncate w-full mb-1">
+                    {rankedPlayers[2] ? rankedPlayers[2].player_name : "---"}
+                  </span>
+                  <span className="text-[10px] text-[var(--foreground)] opacity-70 font-mono font-bold mb-2">
+                    {rankedPlayers[2] ? rankedPlayers[2].score || 0 : 0} pts
+                  </span>
+                  <div className="w-full h-28 bg-gradient-to-t from-amber-700 to-amber-600 rounded-t-xl border-t-4 border-amber-500 flex items-center justify-center shadow-lg">
+                    <span className="text-3xl font-black text-white">3º</span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* LISTA DO 4º LUGAR EM DIANTE */}
-            {rankedPlayers.length > 3 && (
-              <div className="space-y-2 max-h-40 overflow-y-auto pr-2 text-left">
-                {rankedPlayers.slice(3).map((p, idx) => (
-                  <div key={p.id} className="p-3 bg-[var(--background)] border border-[var(--card-border)] rounded-xl flex justify-between items-center text-xs shadow-sm">
-                    <span className="font-bold text-[var(--foreground)]">#{idx + 4} {p.player_name}</span>
-                    <span className="font-mono font-bold text-emerald-500">{p.score || 0} pts</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            {/* PAINEL PEDAGÓGICO DE ESTATÍSTICAS E EXPORTAÇÃO */}
+            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl p-8 shadow-xl space-y-8 transition-colors duration-300 print:border-none print:shadow-none print:p-0">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-[var(--card-border)] pb-6">
+                <div>
+                  <span className="text-xs font-bold text-purple-500 uppercase tracking-widest block mb-1">Relatório Pedagógico da Turma</span>
+                  <h2 className="text-2xl font-black text-[var(--foreground)]">Estatísticas Gerais da Partida</h2>
+                  <p className="text-xs text-[var(--foreground)] opacity-70 mt-1">
+                    PIN: <strong className="font-mono">{session?.pin}</strong> | {players.length} alunos | {questions.length} questões
+                  </p>
+                </div>
 
-            <Link href="/" className="inline-block bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 px-8 rounded-xl transition shadow-md">
-              {t("back_to_main_menu")}
-            </Link>
+                <div className="flex items-center gap-2 print:hidden">
+                  <button
+                    onClick={handleExportCSV}
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5 cursor-pointer"
+                  >
+                    📊 Exportar CSV
+                  </button>
+                  <button
+                    onClick={handlePrintPDF}
+                    className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5 cursor-pointer"
+                  >
+                    📄 Baixar / Imprimir PDF
+                  </button>
+                </div>
+              </div>
+
+              {/* Cartões de Métricas Resumidas */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="p-4 bg-[var(--background)] border border-[var(--card-border)] rounded-2xl space-y-1">
+                  <span className="text-xs text-[var(--foreground)] opacity-70 font-semibold">Taxa Global de Acerto</span>
+                  <p className="text-2xl font-black text-emerald-500 font-mono">{classAccuracyRate}%</p>
+                  <span className="text-[10px] text-[var(--foreground)] opacity-60 block">
+                    {totalGlobalCorrect} de {totalGlobalAnswers} respostas corretas
+                  </span>
+                </div>
+
+                <div className="p-4 bg-[var(--background)] border border-rose-500/30 bg-rose-500/5 rounded-2xl space-y-1">
+                  <span className="text-xs text-rose-500 font-bold flex items-center gap-1">⚠️ Questão Mais Desafiadora</span>
+                  {hardestQuestion ? (
+                    <div>
+                      <p className="text-sm font-black text-[var(--foreground)] line-clamp-1">
+                        Q{hardestQuestion.index}: {hardestQuestion.text}
+                      </p>
+                      <span className="text-[11px] text-rose-500 font-bold font-mono">
+                        {hardestQuestion.errorRate}% de taxa de erro ({hardestQuestion.errorCount} erros)
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-[var(--foreground)] opacity-50">Sem dados</p>
+                  )}
+                </div>
+
+                <div className="p-4 bg-[var(--background)] border border-blue-500/30 bg-blue-500/5 rounded-2xl space-y-1">
+                  <span className="text-xs text-blue-500 font-bold flex items-center gap-1">✨ Questão Mais Fácil</span>
+                  {easiestQuestion ? (
+                    <div>
+                      <p className="text-sm font-black text-[var(--foreground)] line-clamp-1">
+                        Q{easiestQuestion.index}: {easiestQuestion.text}
+                      </p>
+                      <span className="text-[11px] text-blue-500 font-bold font-mono">
+                        {easiestQuestion.accuracy}% de taxa de acerto ({easiestQuestion.correctCount} acertos)
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-[var(--foreground)] opacity-50">Sem dados</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Tabela de Desempenho por Aluno */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-bold text-[var(--foreground)] uppercase tracking-wider">
+                  Boletim Individual dos Alunos
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-[var(--card-border)] text-[var(--foreground)] opacity-70">
+                        <th className="pb-3 font-bold">Posição</th>
+                        <th className="pb-3 font-bold">Aluno</th>
+                        <th className="pb-3 font-bold">Pontuação</th>
+                        <th className="pb-3 font-bold">Acertos</th>
+                        <th className="pb-3 font-bold">Precisão</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--card-border)] font-medium">
+                      {rankedPlayers.map((p, idx) => {
+                        const pAnswers = answers.filter((a) => a.player_id === p.id);
+                        const pCorrect = pAnswers.filter((a) => a.is_correct).length;
+                        const pRate = pAnswers.length > 0 ? Math.round((pCorrect / pAnswers.length) * 100) : 0;
+
+                        return (
+                          <tr key={p.id} className="hover:bg-[var(--background)] transition">
+                            <td className="py-3 font-mono font-bold">
+                              {idx === 0 ? "🥇 1º" : idx === 1 ? "🥈 2º" : idx === 2 ? "🥉 3º" : `#${idx + 1}`}
+                            </td>
+                            <td className="py-3 font-bold text-[var(--foreground)]">{p.player_name}</td>
+                            <td className="py-3 font-mono font-bold text-amber-500">{p.score || 0} pts</td>
+                            <td className="py-3 font-mono">
+                              {pCorrect} / {pAnswers.length}
+                            </td>
+                            <td className="py-3">
+                              <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
+                                pRate >= 70 ? "bg-emerald-500/20 text-emerald-500" : pRate >= 40 ? "bg-amber-500/20 text-amber-500" : "bg-rose-500/20 text-rose-500"
+                              }`}>
+                                {pRate}%
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Ações Pós-Jogo */}
+              <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3 print:hidden">
+                <button
+                  onClick={() => {
+                    setNextQuizId(quizzes[0]?.id || "");
+                    setShowNewQuizModal(true);
+                  }}
+                  className="w-full sm:w-auto bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-extrabold py-3 px-8 rounded-xl transition shadow-lg text-xs cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <span>🔁</span> Jogar Novo Quiz com Esta Turma
+                </button>
+
+                <Link
+                  href="/"
+                  className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 px-8 rounded-xl transition shadow-md text-xs cursor-pointer text-center"
+                >
+                  {t("back_to_main_menu")}
+                </Link>
+              </div>
+            </div>
           </div>
         )}
 
@@ -703,7 +1006,88 @@ export default function HostGamePage() {
             </div>
           </div>
         )}
+
+        {/* MODAL SELEÇÃO DE NOVO QUIZ COM A MESMA TURMA */}
+        {showNewQuizModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-[999]">
+            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] p-6 rounded-3xl max-w-md w-full text-left space-y-5 relative shadow-2xl transition-colors duration-300">
+              <button
+                onClick={() => setShowNewQuizModal(false)}
+                className="absolute top-4 right-4 text-[var(--foreground)] opacity-50 hover:opacity-100 font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+
+              <div>
+                <h3 className="text-xl font-bold text-[var(--foreground)] flex items-center gap-2">
+                  <span>🎯</span> Próximo Quiz da Rodada
+                </h3>
+                <p className="text-xs text-[var(--foreground)] opacity-70 mt-1">
+                  Os <strong>{players.length} alunos</strong> conectados continuarão automaticamente nesta mesma sala.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-[var(--foreground)] opacity-80 block mb-1">
+                    Escolha o Quiz:
+                  </label>
+                  <select
+                    value={nextQuizId}
+                    onChange={(e) => setNextQuizId(e.target.value)}
+                    className="w-full bg-[var(--background)] border border-[var(--card-border)] text-[var(--foreground)] rounded-xl p-3 text-sm font-bold focus:outline-none cursor-pointer"
+                  >
+                    {quizzes.map((q) => (
+                      <option key={q.id} value={q.id}>
+                        {q.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="p-3 bg-[var(--background)] border border-[var(--card-border)] rounded-xl flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="resetScoresCheck"
+                    checked={resetScores}
+                    onChange={(e) => setResetScores(e.target.checked)}
+                    className="w-4 h-4 text-purple-600 rounded cursor-pointer"
+                  />
+                  <label htmlFor="resetScoresCheck" className="text-xs font-bold text-[var(--foreground)] cursor-pointer select-none">
+                    Zerar pontuações (desmarque para somar no placar geral)
+                  </label>
+                </div>
+
+                <button
+                  onClick={handleStartNextQuiz}
+                  disabled={loading}
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold py-3.5 rounded-xl shadow-lg transition cursor-pointer text-sm"
+                >
+                  {loading ? "Preparando nova rodada..." : "Começar Nova Partida 🚀"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* CHAT DA ARENA PARA O PROFESSOR / HOST */}
+        {session && (
+          <ArenaChat
+            sessionId={session.id}
+            playerName={user?.firstName || "Host / Professor"}
+            userClerkId={user?.id}
+          />
+        )}
+        
       </main>
     </div>
+  );
+}
+
+export default function HostGamePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">Carregando sala...</div>}>
+      <HostGameContent />
+    </Suspense>
   );
 }

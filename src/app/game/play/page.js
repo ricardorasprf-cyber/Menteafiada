@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
@@ -9,17 +9,22 @@ import UserMenu from "@/app/components/UserMenu";
 import LanguageSelector from "@/app/components/LanguageSelector";
 import { useLanguage } from "@/contexts/LanguageContext";
 import confetti from "canvas-confetti";
+import ArenaChat from "@/app/components/ArenaChat";
 
 export const dynamic = "force-dynamic";
 
 function GamePlayContent() {
+  const [wasKicked, setWasKicked] = useState(false);
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useUser();
   const { t } = useLanguage();
 
   const urlPin = searchParams.get("pin") || "";
+  const urlName = searchParams.get("name") || "";
+
   const [pin, setPin] = useState(urlPin);
-  const [playerName, setPlayerName] = useState(user?.firstName || "");
+  const [playerName, setPlayerName] = useState(urlName || user?.firstName || "");
   const [userRole, setUserRole] = useState("participant");
   const [session, setSession] = useState(null);
   const [player, setPlayer] = useState(null);
@@ -38,6 +43,12 @@ function GamePlayContent() {
   const [showPodium3, setShowPodium3] = useState(false);
   const [showPodium2, setShowPodium2] = useState(false);
   const [showPodium1, setShowPodium1] = useState(false);
+
+  // Sincronizar parâmetros de URL caso mudem dinamicamente
+  useEffect(() => {
+    if (urlPin) setPin(urlPin);
+    if (urlName) setPlayerName(urlName);
+  }, [urlPin, urlName]);
 
   // Inicializar preferência de áudio local
   useEffect(() => {
@@ -221,6 +232,12 @@ function GamePlayContent() {
       return;
     }
 
+    if (sessionData.status === "FINALIZADO") {
+      setErrorMsg("Esta sala já foi encerrada.");
+      setLoading(false);
+      return;
+    }
+
     setSession(sessionData);
     setTimeLeft(sessionData.time_left || 15);
 
@@ -258,31 +275,102 @@ function GamePlayContent() {
     setPlayer(playerData);
     setLoading(false);
 
-    subscribeToSession(sessionData.id);
+    subscribeToSession(sessionData.id, playerData.id);
   };
 
-  const subscribeToSession = (sessionId) => {
+  const subscribeToSession = (sessionId, currentPlayerId) => {
+    // 1. Escuta mudanças na sessão (perguntas, tempo, reinício com novo quiz)
     supabase
       .channel(`play-session-${sessionId}`)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "game_sessions", filter: `id=eq.${sessionId}` }, (payload) => {
-        const updatedSession = payload.new;
-        setSession((prevSession) => {
-          if (prevSession && prevSession.current_question_index !== updatedSession.current_question_index) {
-            setHasAnswered(false);
-            setSelectedOption(null);
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "game_sessions",
+          filter: `id=eq.${sessionId}`,
+        },
+        async (payload) => {
+          const updatedSession = payload.new;
+
+          // Se o anfitrião carregou um novo quiz na mesma sala
+          if (updatedSession.quiz_id && updatedSession.quiz_id !== session?.quiz_id) {
+            const { data: newQData } = await supabase
+              .from("questions")
+              .select("*")
+              .eq("quiz_id", updatedSession.quiz_id)
+              .order("question_order", { ascending: true });
+
+            if (newQData && newQData.length > 0) {
+              setQuestions(newQData);
+            }
+
+            // Reseta animações de pódio caso venham de uma partida anterior
+            setShowPodium1(false);
+            setShowPodium2(false);
+            setShowPodium3(false);
+            setStreak(0);
+            setStreakBonus(0);
           }
-          return updatedSession;
-        });
-        setTimeLeft(updatedSession.time_left || 15);
-      })
+
+          setSession((prevSession) => {
+            if (
+              prevSession &&
+              (prevSession.current_question_index !== updatedSession.current_question_index ||
+                prevSession.status !== updatedSession.status ||
+                prevSession.quiz_id !== updatedSession.quiz_id)
+            ) {
+              setHasAnswered(false);
+              setSelectedOption(null);
+              setScoreGained(0);
+            }
+            return updatedSession;
+          });
+
+          setTimeLeft(updatedSession.time_left || 15);
+        }
+      )
       .subscribe();
 
+    // 2. Escuta jogadores, pontuações atualizadas e expulsão imediata
     supabase
-      .channel(`play-players-${sessionId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "game_players", filter: `session_id=eq.${sessionId}` }, async () => {
-        const { data } = await supabase.from("game_players").select("*").eq("session_id", sessionId).order("score", { ascending: false });
-        if (data) setAllPlayers(data);
-      })
+      .channel(`play-players-events-${sessionId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "game_players",
+        },
+        async (payload) => {
+          // Se o evento for DELETE e o ID for deste jogador:
+          if (payload.eventType === "DELETE") {
+            const deletedId = payload.old?.id;
+            if (deletedId === currentPlayerId) {
+              setWasKicked(true);
+              setSession(null);
+              setPlayer(null);
+              setHasAnswered(false);
+              return;
+            }
+          }
+
+          // Atualiza lista local de jogadores e sincroniza a pontuação do jogador atual
+          const { data } = await supabase
+            .from("game_players")
+            .select("*")
+            .eq("session_id", sessionId)
+            .order("score", { ascending: false });
+
+          if (data) {
+            setAllPlayers(data);
+            const me = data.find((p) => p.id === currentPlayerId);
+            if (me) {
+              setPlayer((prev) => (prev ? { ...prev, score: me.score } : prev));
+            }
+          }
+        }
+      )
       .subscribe();
   };
 
@@ -363,6 +451,50 @@ function GamePlayContent() {
 
   const currentQuestion = questions[session?.current_question_index || 0];
   const rankedPlayers = [...allPlayers].sort((a, b) => (b.score || 0) - (a.score || 0));
+
+  // TELA VISUAL DE REMOÇÃO (KICK)
+  if (wasKicked) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 font-sans">
+        <div className="max-w-md w-full bg-[var(--card-bg)] border border-rose-500/40 rounded-3xl p-8 text-center space-y-6 shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 text-rose-500 rounded-full flex items-center justify-center text-3xl mx-auto shadow-inner">
+            🚫
+          </div>
+
+          <div className="space-y-2">
+            <h2 className="text-2xl font-black text-[var(--foreground)]">
+              Acesso Removido
+            </h2>
+            <p className="text-xs text-[var(--foreground)] opacity-70 leading-relaxed">
+              Você foi removido desta sala pelo anfitrião da partida.
+            </p>
+          </div>
+
+          <div className="space-y-3 pt-2">
+            <button
+              onClick={() => {
+                setWasKicked(false);
+                router.push("/arena");
+              }}
+              className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition cursor-pointer shadow-lg"
+            >
+              Ir para a Arena Pública ⚔️
+            </button>
+
+            <button
+              onClick={() => {
+                setWasKicked(false);
+                router.push("/");
+              }}
+              className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer"
+            >
+              Voltar ao Início 🏠
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (player && session) {
     return (
@@ -528,6 +660,13 @@ function GamePlayContent() {
             )}
           </div>
         </div>
+
+        {/* Chat ao Vivo da Arena */}
+        <ArenaChat
+          sessionId={session.id}
+          playerName={player.player_name}
+          userClerkId={user?.id}
+        />
       </div>
     );
   }
@@ -562,14 +701,16 @@ function GamePlayContent() {
       </div>
 
       <main className="max-w-md w-full mx-auto px-6 py-12 flex-grow flex items-center justify-center">
-        <div className="bg-[var(--card-bg)] w-full rounded-3xl p-8 shadow-2xl border border-[var(--card-border)] text-center transition-colors duration-300">
-          <h2 className="text-2xl font-bold text-[var(--foreground)] mb-2">{t("enter_quiz")}</h2>
-          <p className="text-xs text-[var(--foreground)] opacity-70 mb-6 font-semibold">
-            {urlPin ? `${t("connecting_pin")} ${urlPin}` : t("insert_pin")}
-          </p>
+        <div className="bg-[var(--card-bg)] w-full rounded-3xl p-8 shadow-2xl border border-[var(--card-border)] text-center transition-colors duration-300 space-y-6">
+          <div>
+            <h2 className="text-2xl font-bold text-[var(--foreground)] mb-2">{t("enter_quiz")}</h2>
+            <p className="text-xs text-[var(--foreground)] opacity-70 font-semibold">
+              {urlPin ? `${t("connecting_pin")} ${urlPin}` : t("insert_pin")}
+            </p>
+          </div>
 
           {errorMsg && (
-            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-500 text-xs font-bold shadow-sm">
+            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-500 text-xs font-bold shadow-sm">
               {errorMsg}
             </div>
           )}
@@ -606,6 +747,16 @@ function GamePlayContent() {
               {loading ? t("connecting") : t("enter_room")}
             </button>
           </form>
+
+          {/* Atalho para a Arena de Competições Livres */}
+          <div className="pt-4 border-t border-[var(--card-border)]">
+            <Link
+              href="/arena"
+              className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-xl text-xs font-bold transition"
+            >
+              <span>⚔️</span> Explorar Salas Abertas na Arena
+            </Link>
+          </div>
         </div>
       </main>
 

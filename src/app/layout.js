@@ -23,22 +23,7 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <ClerkProvider>
-      <html lang="pt-BR" className="theme-classic">
-        <head>
-          <script
-            dangerouslySetInnerHTML={{
-              __html: `
-                (function() {
-                  try {
-                    var theme = localStorage.getItem('platform_theme') || 'theme-classic';
-                    document.documentElement.classList.remove('theme-classic', 'theme-dark', 'theme-synthwave');
-                    document.documentElement.classList.add(theme);
-                  } catch (e) {}
-                })();
-              `,
-            }}
-          />
-        </head>
+      <html lang="pt-BR" className="theme-classic" suppressHydrationWarning>
         <body
           className={`${geistSans.variable} ${geistMono.variable} h-full antialiased bg-[var(--background)] text-[var(--foreground)] transition-colors duration-300`}
         >
