@@ -39,6 +39,7 @@ export default function ParticipantDashboard() {
   const categories = [
     { id: "todas", label: "Todas" },
     { id: "geral", label: "Gerais" },
+    { id: "aulas", label: "Aulas" },
     { id: "vitoria", label: "Vitórias" },
     { id: "precisao", label: "Precisão" },
     { id: "streak", label: "Sequências" },

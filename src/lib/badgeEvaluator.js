@@ -17,7 +17,7 @@ export async function evaluateAndUnlockBadges(userId) {
 
     const unlockedIds = new Set(unlocked ? unlocked.map((u) => u.badge_id) : []);
 
-    // 3. Obter participações do aluno
+    // 3. Obter participações do aluno em jogos
     const { data: playerParticipations } = await supabase
       .from("game_players")
       .select("id, session_id, score")
@@ -41,7 +41,6 @@ export async function evaluateAndUnlockBadges(userId) {
         .order("question_index", { ascending: true });
 
       if (answersData && answersData.length > 0) {
-        // Agrupar respostas por participação para avaliar streaks e partidas perfeitas
         const answersByPlayer = {};
 
         answersData.forEach((a) => {
@@ -58,7 +57,6 @@ export async function evaluateAndUnlockBadges(userId) {
           }
         });
 
-        // Avaliação por partida
         Object.values(answersByPlayer).forEach((pAnswers) => {
           let currentStreak = 0;
           let allCorrect = true;
@@ -75,7 +73,6 @@ export async function evaluateAndUnlockBadges(userId) {
             }
           });
 
-          // Partida sem nenhum erro (mínimo de 5 respostas)
           if (allCorrect && pAnswers.length >= 5) {
             flawlessGamesCount++;
           }
@@ -108,7 +105,15 @@ export async function evaluateAndUnlockBadges(userId) {
       }
     }
 
-    // 4. Mapeamento das regras dos 30 emblemas
+    // Buscar aulas assistidas/concluídas pelo aluno (sem caracteres residuais)
+    const { data: lessonsData } = await supabase
+      .from("lesson_completions")
+      .select("lesson_id, completed_at")
+      .eq("user_clerk_id", userId);
+
+    const lessonsCount = lessonsData?.length || 0;
+
+    // 4. Mapeamento das regras dos emblemas
     const badgesToUnlock = [];
 
     // Vitórias & Pódio
@@ -119,13 +124,20 @@ export async function evaluateAndUnlockBadges(userId) {
     if (firstPlaceCount >= 10 && !unlockedIds.has("legend")) badgesToUnlock.push("legend");
     if (firstPlaceCount >= 20 && !unlockedIds.has("dynasty")) badgesToUnlock.push("dynasty");
 
-    // Participação & Presença
+    // Participação & Presença Geral
     if (gamesPlayedCount >= 1 && !unlockedIds.has("first_game")) badgesToUnlock.push("first_game");
     if (gamesPlayedCount >= 5 && !unlockedIds.has("veteran")) badgesToUnlock.push("veteran");
     if (gamesPlayedCount >= 10 && !unlockedIds.has("dedicated")) badgesToUnlock.push("dedicated");
     if (gamesPlayedCount >= 25 && !unlockedIds.has("veteran_25")) badgesToUnlock.push("veteran_25");
     if (gamesPlayedCount >= 50 && !unlockedIds.has("marathoner")) badgesToUnlock.push("marathoner");
     if (gamesPlayedCount >= 100 && !unlockedIds.has("centenary_player")) badgesToUnlock.push("centenary_player");
+
+    // Aulas Assistidas
+    if (lessonsCount >= 1 && !unlockedIds.has("first_lesson")) badgesToUnlock.push("first_lesson");
+    if (lessonsCount >= 5 && !unlockedIds.has("lessons_5")) badgesToUnlock.push("lessons_5");
+    if (lessonsCount >= 10 && !unlockedIds.has("lessons_10")) badgesToUnlock.push("lessons_10");
+    if (lessonsCount >= 25 && !unlockedIds.has("lessons_25")) badgesToUnlock.push("lessons_25");
+    if (lessonsCount >= 1 && gamesPlayedCount >= 1 && !unlockedIds.has("combo_lesson_quiz")) badgesToUnlock.push("combo_lesson_quiz");
 
     // Precisão
     if (correctAnswersCount >= 10 && !unlockedIds.has("sharp_mind")) badgesToUnlock.push("sharp_mind");
@@ -177,4 +189,24 @@ export async function evaluateAndUnlockBadges(userId) {
     console.error("Erro ao avaliar emblemas:", err);
     return [];
   }
+}
+
+export async function markLessonAsCompleted(userId, lessonId, lessonTitle) {
+  if (!userId || !lessonId) return { success: false, error: "Dados incompletos" };
+
+  const { data, error } = await supabase.from("lesson_completions").insert({
+    user_clerk_id: userId,
+    lesson_id: lessonId,
+    lesson_title: lessonTitle || "Aula Geral",
+  });
+
+  if (error) {
+    if (error.code === "23505") {
+      return { success: true, message: "Aula já concluída anteriormente." };
+    }
+    console.error("Erro ao registar conclusão de aula:", error);
+    return { success: false, error };
+  }
+
+  return { success: true, data };
 }
