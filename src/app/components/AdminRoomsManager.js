@@ -10,6 +10,51 @@ export default function AdminRoomsManager() {
   const [purging, setPurging] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState(null);
 
+  // Estados da Política de Retenção Automática
+  const [autoPurgeEnabled, setAutoPurgeEnabled] = useState(true);
+  const [autoPurgeDays, setAutoPurgeDays] = useState(7);
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  // Carrega as configurações salvas no banco
+  const fetchRetentionSettings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("system_settings")
+        .select("value")
+        .eq("key", "retention_policy")
+        .single();
+
+      if (!error && data?.value) {
+        setAutoPurgeEnabled(data.value.enabled ?? true);
+        setAutoPurgeDays(data.value.days ?? 7);
+      }
+    } catch (err) {
+      console.error("Erro ao carregar configurações de retenção:", err);
+    }
+  };
+
+  // Salva alterações na política de retenção
+  const handleSaveRetentionPolicy = async (newEnabled, newDays) => {
+    setSavingSettings(true);
+    try {
+      const { error } = await supabase
+        .from("system_settings")
+        .upsert({
+          key: "retention_policy",
+          value: { enabled: newEnabled, days: Number(newDays) },
+          updated_at: new Date().toISOString(),
+        });
+
+      if (error) {
+        alert("Erro ao salvar configuração: " + error.message);
+      }
+    } catch (err) {
+      console.error("Erro ao salvar configuração:", err);
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
   const fetchSessions = async () => {
     setLoading(true);
     try {
@@ -39,9 +84,9 @@ export default function AdminRoomsManager() {
   };
 
   useEffect(() => {
+    fetchRetentionSettings();
     fetchSessions();
 
-    // Cria um canal com identificador único para evitar conflitos de ciclo de vida
     const channelId = `admin-rooms-${Date.now()}`;
     const channel = supabase
       .channel(channelId)
@@ -97,14 +142,14 @@ export default function AdminRoomsManager() {
     setActionLoadingId(null);
   };
 
-  // Executar a rotina de exclusão de legado (Salas finalizadas > 7 dias ou abandonadas)
+  // Executar a rotina de exclusão manual pontual
   const handlePurgeLegacy = async () => {
-    const days = prompt("Expurgar salas finalizadas com mais de quantos dias? (Padrão: 7)", "7");
+    const days = prompt("Expurgar salas finalizadas com mais de quantos dias?", autoPurgeDays.toString());
     if (days === null) return;
 
     setPurging(true);
     const { data: count, error } = await supabase.rpc("purge_legacy_sessions", {
-      days_old: parseInt(days, 10) || 7,
+      days_old: parseInt(days, 10) || 1,
     });
 
     if (error) {
@@ -116,7 +161,6 @@ export default function AdminRoomsManager() {
     setPurging(false);
   };
 
-  // Filtros
   const filteredSessions = sessions.filter((s) => {
     if (filter === "ATIVAS") return s.status === "AGUARDANDO" || s.status === "EM_ANDAMENTO";
     if (filter === "LEGADO") return s.status === "FINALIZADO";
@@ -130,32 +174,79 @@ export default function AdminRoomsManager() {
     <div className="space-y-6">
       {/* Barra de Ações & Estatísticas de Salas */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="p-4 bg-[var(--background)] border border-[var(--card-border)] rounded-2xl">
+        <div className="p-4 bg-[var(--background)] border border-[var(--card-border)] rounded-2xl flex flex-col justify-center">
           <span className="text-xs text-[var(--foreground)] opacity-70 font-semibold block">Salas Ativas (Em Aberto)</span>
           <p className="text-2xl font-black text-emerald-500 font-mono mt-1">{activeCount}</p>
         </div>
 
-        <div className="p-4 bg-[var(--background)] border border-[var(--card-border)] rounded-2xl">
+        <div className="p-4 bg-[var(--background)] border border-[var(--card-border)] rounded-2xl flex flex-col justify-center">
           <span className="text-xs text-[var(--foreground)] opacity-70 font-semibold block">Salas em Legado (Finalizadas)</span>
           <p className="text-2xl font-black text-amber-500 font-mono mt-1">{legacyCount}</p>
         </div>
 
-        <div className="p-4 bg-[var(--background)] border border-rose-500/20 bg-rose-500/5 rounded-2xl flex flex-col justify-between">
-          <div>
-            <span className="text-xs text-rose-500 font-bold block">Política de Retenção</span>
-            <span className="text-[11px] text-[var(--foreground)] opacity-60">Expurgo de dados obsoletos</span>
+        {/* Card de Configuração de Automação de Retenção */}
+        <div className="p-4 bg-[var(--background)] border border-rose-500/30 bg-rose-500/5 rounded-2xl flex flex-col justify-between space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-xs text-rose-500 font-bold block flex items-center gap-1.5">
+                ⚙️ Automação de Retenção
+              </span>
+              <span className="text-[11px] text-[var(--foreground)] opacity-60">
+                {savingSettings ? "Salvando alterações..." : "Expurgo automático de dados"}
+              </span>
+            </div>
+
+            {/* Toggle Ativar / Desativar */}
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoPurgeEnabled}
+                onChange={(e) => {
+                  const val = e.target.checked;
+                  setAutoPurgeEnabled(val);
+                  handleSaveRetentionPolicy(val, autoPurgeDays);
+                }}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+            </label>
           </div>
-          <button
-            onClick={handlePurgeLegacy}
-            disabled={purging}
-            className="mt-2 w-full py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow transition cursor-pointer disabled:opacity-50"
-          >
-            {purging ? "Limpando..." : "🧹 Executar Limpeza de Legado"}
-          </button>
+
+          <div className="flex items-center gap-2 pt-1">
+            <span className="text-xs font-semibold text-[var(--foreground)] opacity-80 whitespace-nowrap">
+              Apagar após:
+            </span>
+            <select
+              disabled={!autoPurgeEnabled}
+              value={autoPurgeDays}
+              onChange={(e) => {
+                const days = Number(e.target.value);
+                setAutoPurgeDays(days);
+                handleSaveRetentionPolicy(autoPurgeEnabled, days);
+              }}
+              className="bg-[var(--card-bg)] border border-[var(--card-border)] text-[var(--foreground)] text-xs font-bold rounded-lg px-2.5 py-1.5 focus:outline-none cursor-pointer disabled:opacity-40"
+            >
+              <option value={1}>1 dia (24h)</option>
+              <option value={2}>2 dias</option>
+              <option value={3}>3 dias</option>
+              <option value={7}>7 dias (1 semana)</option>
+              <option value={15}>15 dias</option>
+              <option value={30}>30 dias (1 mês)</option>
+            </select>
+
+            <button
+              onClick={handlePurgeLegacy}
+              disabled={purging}
+              title="Executar expurgo manualmente agora"
+              className="ml-auto py-1.5 px-3 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-[11px] rounded-lg shadow transition cursor-pointer disabled:opacity-50"
+            >
+              {purging ? "Limpando..." : "🧹 Limpar Agora"}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Controles de Tabela */}
+      {/* Controles de Filtros e Tabela */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div className="flex items-center gap-2">
           {["TODAS", "ATIVAS", "LEGADO"].map((opt) => (
@@ -183,7 +274,7 @@ export default function AdminRoomsManager() {
         </button>
       </div>
 
-      {/* Tabela de Salas */}
+      {/* Tabela de Sessões */}
       <div className="overflow-x-auto bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl shadow-xl">
         <table className="w-full text-left text-xs">
           <thead>

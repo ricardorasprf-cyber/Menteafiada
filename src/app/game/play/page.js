@@ -241,9 +241,10 @@ function GamePlayContent() {
     setSession(sessionData);
     setTimeLeft(sessionData.time_left || 15);
 
+    // Consulta segura através da view pública (sem correct_option)
     if (sessionData.quiz_id) {
       const { data: qData } = await supabase
-        .from("questions")
+        .from("public_quiz_questions")
         .select("*")
         .eq("quiz_id", sessionData.quiz_id)
         .order("question_order", { ascending: true });
@@ -251,8 +252,8 @@ function GamePlayContent() {
       setQuestions(qData || []);
     } else {
       setQuestions([
-        { question_text: "Qual é a capital do Brasil?", options: ["São Paulo", "Rio de Janeiro", "Brasília", "Salvador"], correct_option: 2, time_seconds: 15 },
-        { question_text: "Quanto é 2 + 2 x 2?", options: ["8", "6", "4", "10"], correct_option: 1, time_seconds: 15 }
+        { id: "00000000-0000-0000-0000-000000000001", question_text: "Qual é a capital do Brasil?", options: ["São Paulo", "Rio de Janeiro", "Brasília", "Salvador"], time_seconds: 15 },
+        { id: "00000000-0000-0000-0000-000000000002", question_text: "Quanto é 2 + 2 x 2?", options: ["8", "6", "4", "10"], time_seconds: 15 }
       ]);
     }
 
@@ -293,10 +294,10 @@ function GamePlayContent() {
         async (payload) => {
           const updatedSession = payload.new;
 
-          // Se o anfitrião carregou um novo quiz na mesma sala
+          // Se o anfitrião carregou um novo quiz na mesma sala (via view pública)
           if (updatedSession.quiz_id && updatedSession.quiz_id !== session?.quiz_id) {
             const { data: newQData } = await supabase
-              .from("questions")
+              .from("public_quiz_questions")
               .select("*")
               .eq("quiz_id", updatedSession.quiz_id)
               .order("question_order", { ascending: true });
@@ -332,7 +333,7 @@ function GamePlayContent() {
       )
       .subscribe();
 
-    // 2. Escuta jogadores, pontuações atualizadas e expulsão imediata
+    // 2. Escuta eventos da tabela de jogadores (Expulsão e atualização via View LGPD anonimizada)
     supabase
       .channel(`play-players-events-${sessionId}`)
       .on(
@@ -343,7 +344,6 @@ function GamePlayContent() {
           table: "game_players",
         },
         async (payload) => {
-          // Se o evento for DELETE e o ID for deste jogador:
           if (payload.eventType === "DELETE") {
             const deletedId = payload.old?.id;
             if (deletedId === currentPlayerId) {
@@ -355,9 +355,9 @@ function GamePlayContent() {
             }
           }
 
-          // Atualiza lista local de jogadores e sincroniza a pontuação do jogador atual
+          // Consulta segura via view sem expor o clerk_id de outros participantes
           const { data } = await supabase
-            .from("game_players")
+            .from("public_game_leaderboard")
             .select("*")
             .eq("session_id", sessionId)
             .order("score", { ascending: false });
@@ -391,6 +391,7 @@ function GamePlayContent() {
     return () => clearInterval(interval);
   }, [session?.time_state, timeLeft, hasAnswered, soundEnabled]);
 
+  // Envio de Resposta com Validação Segura no PostgreSQL (RPC submit_player_answer)
   const handleSelectOption = async (optionIdx) => {
     if (hasAnswered || session?.time_state !== "RODANDO") return;
 
@@ -399,54 +400,55 @@ function GamePlayContent() {
     setHasAnswered(true);
 
     const currentQ = questions[session.current_question_index || 0];
-    const isCorrect = optionIdx === currentQ?.correct_option;
 
-    let basePoints = 0;
-    let bonus = 0;
-    let newStreak = 0;
+    try {
+      const { data, error } = await supabase.rpc("submit_player_answer", {
+        p_session_id: session.id,
+        p_player_id: player.id,
+        p_question_id: currentQ.id,
+        p_selected_option: optionIdx,
+        p_time_left: timeLeft || 0,
+      });
 
-    if (isCorrect) {
-      newStreak = streak + 1;
-      setStreak(newStreak);
-
-      basePoints = 500 + Math.round(((timeLeft || 15) / 15) * 500);
-
-      if (newStreak === 2) bonus = 100;
-      else if (newStreak === 3) bonus = 200;
-      else if (newStreak >= 4) bonus = 300;
-
-      setStreakBonus(bonus);
-
-      if (newStreak >= 2) {
-        playSoundEffect("STREAK");
-      } else {
-        playSoundEffect("CORRECT");
+      if (error) {
+        console.error("Erro na RPC submit_player_answer:", error.message);
+        return;
       }
-    } else {
-      setStreak(0);
-      setStreakBonus(0);
-      playSoundEffect("WRONG");
+
+      if (data?.success) {
+        const isCorrect = data.is_correct;
+        const totalGained = data.points_earned || 0;
+        setScoreGained(totalGained);
+
+        if (isCorrect) {
+          const newStreak = streak + 1;
+          setStreak(newStreak);
+
+          let bonus = 0;
+          if (newStreak === 2) bonus = 100;
+          else if (newStreak === 3) bonus = 200;
+          else if (newStreak >= 4) bonus = 300;
+          setStreakBonus(bonus);
+
+          if (newStreak >= 2) {
+            playSoundEffect("STREAK");
+          } else {
+            playSoundEffect("CORRECT");
+          }
+
+          setPlayer((prev) => ({
+            ...prev,
+            score: (prev?.score || 0) + totalGained,
+          }));
+        } else {
+          setStreak(0);
+          setStreakBonus(0);
+          playSoundEffect("WRONG");
+        }
+      }
+    } catch (err) {
+      console.error("Falha ao registrar resposta:", err);
     }
-
-    const totalGained = basePoints + bonus;
-    setScoreGained(totalGained);
-
-    if (isCorrect) {
-      const newScore = (player?.score || 0) + totalGained;
-      setPlayer((prev) => ({ ...prev, score: newScore }));
-
-      await supabase.from("game_players").update({ score: newScore }).eq("id", player.id);
-    }
-
-    await supabase.from("player_answers").insert({
-      session_id: session.id,
-      player_id: player.id,
-      question_index: session.current_question_index || 0,
-      selected_option: optionIdx,
-      is_correct: isCorrect,
-      score_gained: totalGained,
-      time_left: timeLeft,
-    });
   };
 
   const currentQuestion = questions[session?.current_question_index || 0];
@@ -661,7 +663,7 @@ function GamePlayContent() {
           </div>
         </div>
 
-        {/* Chat ao Vivo da Arena */}
+        {/* Chat ao Vivo da Arena com Moderação Ativa */}
         <ArenaChat
           sessionId={session.id}
           playerName={player.player_name}
@@ -746,6 +748,12 @@ function GamePlayContent() {
             >
               {loading ? t("connecting") : t("enter_room")}
             </button>
+
+            {/* Aviso de Privacidade e Minimização de Dados (LGPD - Menores) */}
+            <p className="text-[10px] text-[var(--foreground)] opacity-50 text-center leading-normal pt-2">
+              🔒 Ao entrar, você concorda com o uso do apelido apenas para a dinâmica da partida. 
+              Nenhum dado pessoal sensível é exposto publicamente.
+            </p>
           </form>
 
           {/* Atalho para a Arena de Competições Livres */}

@@ -3,47 +3,53 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 
+// Lista base de termos ofensivos a ofuscar (expansível conforme a moderação pedagógica)
+const PROFANITY_LIST = [
+  "merda", "puta", "porra", "caralho", "foda", "foder", "caralhos", 
+  "viado", "buceta", "pau", "otario", "otaria", "imbecil", "idiota",
+  "desgracado", "desgracada", "filho da puta", "fdp", "corno", "arrombado"
+];
+
+// Regex para bloquear links ou propagação de URLs suspeitas no chat
+const URL_REGEX = /(https?:\/\/[^\s]+)|(www\.[^\s]+)|([a-zA-Z0-9_-]+\.(com|org|net|edu|gov|io|gg|me|xyz|app))/gi;
+
 export default function ArenaChat({ sessionId, playerName, userClerkId }) {
   const [messages, setMessages] = useState([]);
-  const [inputMessage, setInputMessage] = useState("");
+  const [newMessage, setNewMessage] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  const messagesEndRef = useRef(null);
+  const [lastSentTime, setLastSentTime] = useState(0);
+  const [floodWarning, setFloodWarning] = useState("");
 
-  // Rolar para a última mensagem
+  const chatEndRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // Rolagem automática para a mensagem mais recente
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // Buscar mensagens existentes e subscrever ao Realtime
+  useEffect(() => {
+    if (isOpen) {
+      scrollToBottom();
+      setUnreadCount(0);
+    }
+  }, [messages, isOpen]);
+
+  // Subscrição em tempo real ao canal de mensagens da sessão
   useEffect(() => {
     if (!sessionId) return;
 
-    const fetchMessages = async () => {
-      const { data } = await supabase
-        .from("arena_messages")
-        .select("*")
-        .eq("session_id", sessionId)
-        .order("created_at", { ascending: true });
-
-      if (data) setMessages(data);
-    };
-
-    fetchMessages();
-
-    // Escutar novas mensagens instantaneamente
+    const channelId = `arena-chat-${sessionId}-${Date.now()}`;
     const channel = supabase
-      .channel(`chat-${sessionId}`)
+      .channel(channelId)
       .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "arena_messages",
-          filter: `session_id=eq.${sessionId}`,
-        },
+        "broadcast",
+        { event: "chat_message" },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new]);
+          const incoming = payload.payload;
+          setMessages((prev) => [...prev, incoming]);
+
           if (!isOpen) {
             setUnreadCount((c) => c + 1);
           }
@@ -56,118 +62,170 @@ export default function ArenaChat({ sessionId, playerName, userClerkId }) {
     };
   }, [sessionId, isOpen]);
 
-  useEffect(() => {
-    if (isOpen) {
-      setUnreadCount(0);
-      scrollToBottom();
-    }
-  }, [isOpen, messages]);
+  // Sanitizador de texto contra XSS e espaços em branco abusivos
+  const sanitizeInput = (text) => {
+    return text
+      .trim()
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .slice(0, 160); // Limita a 160 caracteres por mensagem
+  };
 
-  // Enviar mensagem
+  // Filtro de Moderação de Conteúdo (Linguagem imprópria e links)
+  const moderateContent = (text) => {
+    let cleanText = text;
+
+    // 1. Bloqueia ou mascara hiperligações
+    cleanText = cleanText.replace(URL_REGEX, "[link removido]");
+
+    // 2. Ofusca termos da lista de calão com asteriscos
+    PROFANITY_LIST.forEach((word) => {
+      const regex = new RegExp(`\\b${word}\\b`, "gi");
+      cleanText = cleanText.replace(regex, "*".repeat(word.length));
+    });
+
+    return cleanText;
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    const cleanText = inputMessage.trim();
-    if (!cleanText || !sessionId) return;
+    setFloodWarning("");
 
-    setInputMessage("");
+    const now = Date.now();
+    // Trava de Rate Limiting: 1,5 segundos entre envios para evitar flood
+    if (now - lastSentTime < 1500) {
+      setFloodWarning("Aguarde um momento antes de enviar outra mensagem.");
+      return;
+    }
 
-    await supabase.from("arena_messages").insert({
-      session_id: sessionId,
-      sender_name: playerName || "Jogador",
-      sender_clerk_id: userClerkId || null,
-      message: cleanText,
+    const cleanRaw = sanitizeInput(newMessage);
+    if (!cleanRaw) return;
+
+    // Aplica o filtro de palavras impróprias
+    const filteredText = moderateContent(cleanRaw);
+
+    const messagePayload = {
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      sender: playerName || "Participante",
+      text: filteredText,
+      timestamp: new Date().toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" }),
+      isSelf: false,
+    };
+
+    // Atualiza estado local imediatamente (marcando como própria)
+    setMessages((prev) => [...prev, { ...messagePayload, isSelf: true }]);
+    setNewMessage("");
+    setLastSentTime(now);
+
+    // Dispara via Supabase Broadcast para todos os participantes na sala
+    await supabase.channel(`arena-chat-${sessionId}`).send({
+      type: "broadcast",
+      event: "chat_message",
+      payload: messagePayload,
     });
   };
 
   return (
-    <div className="fixed bottom-5 right-5 z-[999] font-sans">
-      {/* Botão Flutuante de Abrir/Fechar Chat */}
+    <div className="fixed bottom-6 right-6 z-50 font-sans">
+      {/* Botão Flutuante de Abertura do Chat */}
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="relative bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white p-3.5 rounded-full shadow-2xl transition cursor-pointer flex items-center justify-center border border-purple-400/40"
+          className="relative flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-2xl shadow-xl shadow-purple-900/30 font-bold text-xs transition-all hover:scale-105 cursor-pointer"
         >
-          <span className="text-xl">💬</span>
+          <span>💬</span>
+          <span>Chat da Sala</span>
           {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-rose-500 text-white font-extrabold text-[10px] w-5 h-5 rounded-full flex items-center justify-center animate-bounce border-2 border-slate-900">
+            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full border-2 border-slate-900 animate-pulse">
               {unreadCount}
             </span>
           )}
         </button>
       )}
 
-      {/* Caixa do Chat Aberta */}
+      {/* Caixa de Mensagens Expansível */}
       {isOpen && (
-        <div className="w-80 sm:w-96 h-96 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl shadow-2xl flex flex-col overflow-hidden backdrop-blur-xl animate-in zoom-in-95 duration-150">
-          {/* Header do Chat */}
-          <div className="p-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between text-white">
+        <div className="w-80 sm:w-96 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl shadow-2xl flex flex-col h-[460px] overflow-hidden animate-in slide-in-from-bottom-5 duration-200">
+          
+          {/* Topo do Chat */}
+          <div className="p-4 bg-slate-900 border-b border-slate-800 flex items-center justify-between text-white">
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span className="text-xs font-black tracking-wider uppercase">
-                Chat da Arena ⚔️
-              </span>
+              <span className="text-base">💬</span>
+              <div>
+                <h4 className="font-bold text-xs">Chat da Partida</h4>
+                <p className="text-[10px] text-slate-400">Moderação ativa & ambiente seguro</p>
+              </div>
             </div>
             <button
               onClick={() => setIsOpen(false)}
-              className="text-slate-400 hover:text-white text-sm font-bold px-2 py-0.5 rounded cursor-pointer"
+              className="text-slate-400 hover:text-white text-sm p-1 rounded-lg hover:bg-slate-800 transition"
             >
               ✕
             </button>
           </div>
 
-          {/* Histórico de Mensagens */}
-          <div className="flex-1 p-3.5 overflow-y-auto space-y-2.5 text-xs">
+          {/* Área de Visualização de Mensagens */}
+          <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[var(--background)]">
             {messages.length === 0 ? (
-              <p className="text-center text-[var(--foreground)] opacity-40 py-12">
-                Nenhuma mensagem enviada. Seja o primeiro a falar! 👋
-              </p>
+              <div className="h-full flex flex-col items-center justify-center text-center opacity-50 space-y-1">
+                <span className="text-2xl">🤝</span>
+                <p className="text-xs">Nenhuma mensagem ainda.</p>
+                <p className="text-[10px]">Deseje boa sorte aos outros jogadores!</p>
+              </div>
             ) : (
-              messages.map((m) => {
-                const isMe = m.sender_name === playerName;
-                return (
+              messages.map((msg) => (
+                <div
+                  key={msg.id}
+                  className={`flex flex-col ${msg.isSelf ? "items-end" : "items-start"}`}
+                >
+                  <span className="text-[10px] opacity-60 mb-0.5 px-1">
+                    {msg.isSelf ? "Você" : msg.sender} • {msg.timestamp}
+                  </span>
                   <div
-                    key={m.id}
-                    className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}
+                    className={`max-w-[85%] px-3.5 py-2 rounded-2xl text-xs font-medium break-words shadow-sm ${
+                      msg.isSelf
+                        ? "bg-purple-600 text-white rounded-tr-none"
+                        : "bg-[var(--card-bg)] border border-[var(--card-border)] text-[var(--foreground)] rounded-tl-none"
+                    }`}
                   >
-                    <span className="text-[10px] font-bold opacity-60 mb-0.5 px-1">
-                      {isMe ? "Você" : m.sender_name}
-                    </span>
-                    <div
-                      className={`px-3 py-2 rounded-2xl max-w-[85%] break-words ${
-                        isMe
-                          ? "bg-purple-600 text-white rounded-br-xs"
-                          : "bg-[var(--background)] border border-[var(--card-border)] text-[var(--foreground)] rounded-bl-xs"
-                      }`}
-                    >
-                      {m.message}
-                    </div>
+                    {msg.text}
                   </div>
-                );
-              })
+                </div>
+              ))
             )}
-            <div ref={messagesEndRef} />
+            <div ref={chatEndRef} />
           </div>
 
-          {/* Input de Envio */}
+          {/* Alerta de Flood / Spam */}
+          {floodWarning && (
+            <div className="px-4 py-1.5 bg-rose-500/10 border-t border-rose-500/20 text-rose-500 text-[11px] font-bold text-center">
+              ⚠️ {floodWarning}
+            </div>
+          )}
+
+          {/* Formulário de Envio */}
           <form
             onSubmit={handleSendMessage}
-            className="p-2.5 bg-slate-900 border-t border-slate-800 flex items-center gap-2"
+            className="p-3 bg-[var(--card-bg)] border-t border-[var(--card-border)] flex items-center gap-2"
           >
             <input
+              ref={inputRef}
               type="text"
-              placeholder="Digite sua mensagem..."
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              maxLength={140}
-              className="flex-1 bg-slate-800 border border-slate-700 text-white text-xs px-3 py-2 rounded-xl focus:outline-none placeholder-slate-500"
+              maxLength={160}
+              placeholder="Digite uma mensagem..."
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              className="flex-1 bg-[var(--background)] border border-[var(--card-border)] text-[var(--foreground)] text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-purple-500"
             />
             <button
               type="submit"
-              className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-3 py-2 rounded-xl text-xs transition cursor-pointer"
+              disabled={!newMessage.trim()}
+              className="px-3.5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer"
             >
               ➤
             </button>
           </form>
+
         </div>
       )}
     </div>

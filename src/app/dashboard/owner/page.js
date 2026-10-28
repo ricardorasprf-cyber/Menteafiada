@@ -37,17 +37,45 @@ export default function OwnerDashboard() {
   };
 
   const handleRoleChange = async (userId, newRole) => {
+    const targetUser = users.find((u) => u.id === userId);
+
+    // Otimisticamente atualiza o estado da UI
     setUsers(users.map((u) => (u.id === userId ? { ...u, role: newRole } : u)));
 
-    const { error } = await supabase
+    // 1. Atualiza no Supabase
+    const { error: dbError } = await supabase
       .from("profiles")
       .update({ role: newRole })
       .eq("id", userId);
 
-    if (error) {
-      console.error("Erro ao atualizar perfil:", error);
+    if (dbError) {
+      console.error("Erro ao atualizar perfil no Supabase:", dbError);
       alert("Erro ao atualizar o perfil. Tente novamente.");
       fetchUsers();
+      return;
+    }
+
+    // 2. Sincroniza com os metadados do Clerk para validar no middleware
+    const targetClerkId = targetUser?.clerk_id || targetUser?.id;
+
+    if (targetClerkId) {
+      try {
+        const res = await fetch("/api/admin/update-role", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetClerkId,
+            newRole,
+          }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          console.warn("Aviso ao sincronizar cargo no Clerk:", errData?.error);
+        }
+      } catch (err) {
+        console.error("Falha na chamada de sincronização com o Clerk:", err);
+      }
     }
   };
 
@@ -71,6 +99,21 @@ export default function OwnerDashboard() {
       const priorityB = rolePriority[b.role || "participant"] || 5;
       return priorityA - priorityB;
     });
+
+  // Cálculo de faixa etária protegida (Princípio da Minimização - LGPD)
+  const formatAgeFromBirthdate = (dateString) => {
+    if (!dateString) return "N/D";
+    const birth = new Date(dateString);
+    if (isNaN(birth.getTime())) return "N/D";
+
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    const m = today.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+      age--;
+    }
+    return `${age} anos`;
+  };
 
   // Contadores para as abas
   const counts = {
@@ -204,7 +247,7 @@ export default function OwnerDashboard() {
                     <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm uppercase tracking-wider">
                       <th className="p-4 font-semibold">Nome</th>
                       <th className="p-4 font-semibold">Email</th>
-                      <th className="p-4 font-semibold">Data Nasc.</th>
+                      <th className="p-4 font-semibold">Idade (LGPD)</th>
                       <th className="p-4 font-semibold">Cargo (Role)</th>
                     </tr>
                   </thead>
@@ -237,7 +280,11 @@ export default function OwnerDashboard() {
                             {userItem.name}
                           </td>
                           <td className="p-4 text-sm">{userItem.email}</td>
-                          <td className="p-4 text-sm">{userItem.data_nascimento || "N/D"}</td>
+                          <td className="p-4 text-sm font-medium">
+                            <span className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono text-xs">
+                              {formatAgeFromBirthdate(userItem.data_nascimento)}
+                            </span>
+                          </td>
                           <td className="p-4">
                             <select
                               value={userItem.role || "participant"}
