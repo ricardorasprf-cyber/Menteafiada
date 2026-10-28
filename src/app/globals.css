@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card-bg: var(--card-bg);
+  --color-card-border: var(--card-border);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* 1. TEMA MODO CLARO (Branco MenteAfiada) */
+html.theme-classic, html:not([class*="theme-"]) {
+  --background: #f8fafc;
+  --foreground: #0f172a;    /* Texto principal em azul escuro/preto */
+  --card-bg: #ffffff;       /* Cartões em branco puro */
+  --card-border: #cbd5e1;   /* Bordas visíveis */
+}
+
+/* 2. TEMA MODO ESCURO (Dark Mode Preto) */
+html.theme-dark {
+  --background: #020617;
+  --foreground: #f8fafc;
+  --card-bg: #0f172a;
+  --card-border: #1e293b;
+}
+
+/* 3. TEMA SYNTHWAVE / NEON (Roxo Vibrante) */
+html.theme-synthwave {
+  --background: #1a0933;
+  --foreground: #f472b6;
+  --card-bg: #2d1254;
+  --card-border: #5b21b6;
+}
+
+/* APLICAÇÃO GLOBAL DAS CORES */
+html, body {
+  background-color: var(--background) !important;
+  color: var(--foreground) !important;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  min-height: 100vh;
+}
