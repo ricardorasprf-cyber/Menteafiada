@@ -26,7 +26,7 @@ export async function POST(req) {
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
-    // Cabeçalhos de verificação
+    // Cabeçalhos de verificação do Svix
     const headerPayload = await headers();
     const svix_id = headerPayload.get("svix-id");
     const svix_timestamp = headerPayload.get("svix-timestamp");
@@ -36,32 +36,29 @@ export async function POST(req) {
       return new NextResponse("Assinatura ausente", { status: 400 });
     }
 
-    // Leitura do body bruto
     const body = await req.text();
     const wh = new Webhook(WEBHOOK_SECRET);
 
-    let eventPayload;
+    // Validação criptográfica da assinatura
     try {
-      eventPayload = wh.verify(body, {
+      wh.verify(body, {
         "svix-id": svix_id,
         "svix-timestamp": svix_timestamp,
         "svix-signature": svix_signature,
       });
     } catch (err) {
-      console.error("Falha ao validar assinatura:", err.message);
+      console.error("Assinatura inválida:", err.message);
       return new NextResponse("Assinatura inválida", { status: 400 });
     }
 
-    // Garante compatibilidade caso o retorno do svix seja string ou objeto
-    const evt = typeof eventPayload === "string" ? JSON.parse(eventPayload) : eventPayload;
+    // Leitura garantida do corpo da mensagem
+    const evt = JSON.parse(body);
+    const eventType = evt?.type;
+    const data = evt?.data || {};
 
-    if (!evt || !evt.type) {
-      console.error("Evento inválido recebido:", evt);
-      return new NextResponse("Evento mal formatado", { status: 400 });
+    if (!eventType) {
+      return new NextResponse("Tipo de evento não informado", { status: 400 });
     }
-
-    const eventType = evt.type;
-    const data = evt.data || {};
 
     // 1. EVENTO: CRIAÇÃO DE USUÁRIO
     if (eventType === "user.created") {
