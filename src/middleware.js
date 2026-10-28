@@ -1,15 +1,16 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
-// 1. Rotas acessíveis sem login e rotas de serviço/onboarding do Clerk
+// 1. Rotas acessíveis sem login, APIs de serviço, webhooks e telas de perfil/onboarding
 const isPublicRoute = createRouteMatcher([
   "/",
   "/arena(.*)",
   "/game/play(.*)",
-  "/api/webhooks(.*)",
+  "/api/(.*)",              // Permite chamadas de API (como salvar a data e webhooks)
   "/sign-in(.*)",
   "/sign-up(.*)",
-  "/account(.*)", // Permite ao usuário editar perfil / completar pendências sem travar
+  "/account(.*)",           // Painel e pendências de conta do Clerk
+  "/completar-perfil(.*)",  // Página do formulário de aniversário
 ]);
 
 // 2. Rotas restritas que exigem nível Proprietário (Owner)
@@ -23,7 +24,7 @@ const isHostRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
-  // Se for rota pública ou de fluxo de autenticação, deixa o Clerk processar naturalmente
+  // Se for rota pública ou de fluxo de onboarding/API, libera para execução direta
   if (isPublicRoute(request)) {
     return;
   }
@@ -58,7 +59,7 @@ export const config = {
   matcher: [
     // Pula arquivos estáticos e internos do Next.js
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    // Sempre executa para rotas de API e trpc
+    // Garante execução para rotas de API e trpc
     "/(api|trpc)(.*)",
   ],
 };

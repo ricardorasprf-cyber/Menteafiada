@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useAuth } from "@clerk/nextjs";
-import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import LanguageSelector from "@/app/components/LanguageSelector";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -16,11 +15,10 @@ export default function CompletarPerfil() {
   const [mes, setMes] = useState("");
   const [ano, setAno] = useState("");
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
-  // Arrays para criar as opções das caixas de seleção
   const dias = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"));
-  
-  // Meses com nomes traduzidos dinamicamente
+
   const meses = [
     { valor: "01", nome: t("month_01") }, { valor: "02", nome: t("month_02") },
     { valor: "03", nome: t("month_03") }, { valor: "04", nome: t("month_04") },
@@ -29,12 +27,10 @@ export default function CompletarPerfil() {
     { valor: "09", nome: t("month_09") }, { valor: "10", nome: t("month_10") },
     { valor: "11", nome: t("month_11") }, { valor: "12", nome: t("month_12") }
   ];
-  
-  // Limita os anos disponíveis
+
   const anoAtual = new Date().getFullYear();
   const anos = Array.from({ length: 100 }, (_, i) => String(anoAtual - 1 - i));
 
-  // Cálculo dinâmico da idade sempre que as datas são alteradas
   let idade = null;
   if (dia && mes && ano) {
     const dataNascimento = new Date(`${ano}-${mes}-${dia}T00:00:00`);
@@ -47,51 +43,68 @@ export default function CompletarPerfil() {
     idade = calcIdade;
   }
 
-  // Função que guarda os dados no Supabase
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!dia || !mes || !ano) return;
     setLoading(true);
+    setErrorMessage("");
 
     const dataFormatada = `${ano}-${mes}-${dia}`;
 
-    const { error } = await supabase
-      .from("profiles")
-      .update({ data_nascimento: dataFormatada })
-      .eq("clerk_id", userId);
+    try {
+      const res = await fetch("/api/profile/update-birthdate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data_nascimento: dataFormatada }),
+      });
 
-    if (!error) {
-      router.push("/dashboard/participant"); // Redireciona para o painel correto
-    } else {
-      console.error("Erro ao guardar:", error);
+      const result = await res.json();
+
+      if (res.ok && result.success) {
+        // Redireciona com replace para limpar o histórico e não voltar ao form
+        router.replace("/dashboard/participant");
+      } else {
+        setErrorMessage(result.error || "Erro ao salvar perfil.");
+        setLoading(false);
+      }
+    } catch (err) {
+      console.error("Erro na requisição:", err);
+      setErrorMessage("Erro de conexão ao salvar.");
       setLoading(false);
     }
   };
 
-  if (!isLoaded) return <div className="min-h-screen bg-[var(--background)] flex items-center justify-center text-[var(--foreground)] font-bold">{t("loading_auth")}</div>;
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center text-[var(--foreground)] font-bold">
+        {t("loading_auth")}
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[var(--background)] flex flex-col items-center justify-center p-6 font-sans transition-colors duration-300 relative">
-      
-      {/* Seletor de Idioma no topo */}
       <div className="absolute top-6 right-6 z-50">
         <LanguageSelector />
       </div>
 
       <div className="max-w-md w-full bg-[var(--card-bg)] rounded-3xl p-8 shadow-2xl border border-[var(--card-border)] text-center transition-colors duration-300">
-        
-        {/* Logo / Ícone */}
         <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-purple-500/10 flex items-center justify-center overflow-hidden border border-purple-500/20">
           <img src="/logo-dark.jpeg" alt="Logo MenteAfiada" className="w-12 h-12 rounded-xl object-cover" />
         </div>
-        
+
         <h2 className="text-2xl font-bold text-[var(--foreground)] mb-8">
           {t("insert_birthdate_title")}
         </h2>
 
+        {errorMessage && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-500 text-sm font-medium">
+            {errorMessage}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-6 text-left">
           <div className="flex gap-4">
-            
             {/* DIA */}
             <div className="flex-1">
               <label className="block text-sm font-semibold text-[var(--foreground)] opacity-80 mb-2">
@@ -104,7 +117,7 @@ export default function CompletarPerfil() {
                 required
               >
                 <option value="" disabled>{t("day")}</option>
-                {dias.map(d => <option key={d} value={d}>{d}</option>)}
+                {dias.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
 
@@ -120,7 +133,7 @@ export default function CompletarPerfil() {
                 required
               >
                 <option value="" disabled>{t("month")}</option>
-                {meses.map(m => <option key={m.valor} value={m.valor}>{m.nome}</option>)}
+                {meses.map((m) => <option key={m.valor} value={m.valor}>{m.nome}</option>)}
               </select>
             </div>
 
@@ -136,19 +149,20 @@ export default function CompletarPerfil() {
                 required
               >
                 <option value="" disabled>{t("year")}</option>
-                {anos.map(a => <option key={a} value={a}>{a}</option>)}
+                {anos.map((a) => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
           </div>
 
-          {/* Exibição da Idade Dinâmica */}
           {idade !== null && (
             <p className="text-[var(--foreground)] opacity-80 font-medium text-center bg-[var(--background)] py-3 rounded-xl border border-[var(--card-border)] shadow-inner">
-              {t("your_age")} <span className="font-bold text-[var(--foreground)] text-emerald-500">{idade} {t("years_old")}</span>
+              {t("your_age")}{" "}
+              <span className="font-bold text-emerald-500">
+                {idade} {t("years_old")}
+              </span>
             </p>
           )}
 
-          {/* Botão de Submissão */}
           <button
             type="submit"
             disabled={loading || !dia || !mes || !ano}
