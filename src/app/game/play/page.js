@@ -1,21 +1,21 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import UserMenu from "@/app/components/UserMenu";
-import LanguageSelector from "@/app/components/LanguageSelector"; // Importação do Seletor
-import { useLanguage } from "@/contexts/LanguageContext"; // Importação do Contexto
+import LanguageSelector from "@/app/components/LanguageSelector";
+import { useLanguage } from "@/contexts/LanguageContext";
 import confetti from "canvas-confetti";
-import { Suspense } from "react";
 
-export default function PlayGamePage() {
+export const dynamic = "force-dynamic";
+
+function GamePlayContent() {
   const searchParams = useSearchParams();
   const { user } = useUser();
-  const { t } = useLanguage(); // Chamada da função de tradução
+  const { t } = useLanguage();
 
   const urlPin = searchParams.get("pin") || "";
   const [pin, setPin] = useState(urlPin);
@@ -28,7 +28,7 @@ export default function PlayGamePage() {
   const [selectedOption, setSelectedOption] = useState(null);
   const [hasAnswered, setHasAnswered] = useState(false);
   const [scoreGained, setScoreGained] = useState(0);
-  const [streak, setStreak] = useState(0); 
+  const [streak, setStreak] = useState(0);
   const [streakBonus, setStreakBonus] = useState(0);
   const [timeLeft, setTimeLeft] = useState(15);
   const [loading, setLoading] = useState(false);
@@ -56,11 +56,11 @@ export default function PlayGamePage() {
 
   useEffect(() => {
     if (session?.status === "FINALIZADO") {
-      setTimeout(() => setShowPodium3(true), 800);   
-      setTimeout(() => setShowPodium2(true), 2200);  
+      setTimeout(() => setShowPodium3(true), 800);
+      setTimeout(() => setShowPodium2(true), 2200);
       setTimeout(() => {
-        setShowPodium1(true);                        
-        dispararConfetes20s();                       
+        setShowPodium1(true);
+        dispararConfetes20s();
       }, 3800);
     }
   }, [session?.status]);
@@ -115,7 +115,7 @@ export default function PlayGamePage() {
         osc.start();
         osc.stop(ctx.currentTime + 0.3);
       } else if (type === "STREAK") {
-        const notes = [523.25, 659.25, 783.99, 1046.50];
+        const notes = [523.25, 659.25, 783.99, 1046.5];
         notes.forEach((freq, idx) => {
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
@@ -165,7 +165,7 @@ export default function PlayGamePage() {
         .select("*")
         .eq("quiz_id", sessionData.quiz_id)
         .order("question_order", { ascending: true });
-      
+
       setQuestions(qData || []);
     } else {
       setQuestions([
@@ -292,7 +292,6 @@ export default function PlayGamePage() {
   if (player && session) {
     return (
       <div className="min-h-screen bg-[var(--background)] font-sans text-[var(--foreground)] flex flex-col transition-colors duration-300">
-        
         <div className="bg-slate-900 border-b border-slate-800 transition-none">
           <header className="py-4 px-6">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -304,7 +303,7 @@ export default function PlayGamePage() {
                   Mente<span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400">Afiada</span>
                 </span>
               </Link>
-              
+
               <nav className="flex items-center gap-3">
                 <LanguageSelector />
                 {user && <UserMenu userName={user.firstName || "Aluno"} userRole={userRole} />}
@@ -315,7 +314,6 @@ export default function PlayGamePage() {
 
         <div className="flex-grow flex flex-col items-center justify-center p-6">
           <div className="max-w-md w-full bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl p-6 shadow-2xl space-y-6 transition-colors duration-300">
-            
             <div className="flex justify-between items-center border-b border-[var(--card-border)] pb-4">
               <div>
                 <span className="text-xs text-[var(--foreground)] opacity-70">{t("player")}</span>
@@ -345,7 +343,9 @@ export default function PlayGamePage() {
             {session.status === "EM_ANDAMENTO" && currentQuestion && (
               <div className="space-y-6">
                 <div className="flex justify-between items-center text-xs font-semibold">
-                  <span className="text-[var(--foreground)] opacity-70">{t("question")} {(session.current_question_index || 0) + 1} {t("of")} {questions.length}</span>
+                  <span className="text-[var(--foreground)] opacity-70">
+                    {t("question")} {(session.current_question_index || 0) + 1} {t("of")} {questions.length}
+                  </span>
                   <div className="flex items-center gap-1.5 bg-[var(--background)] border border-[var(--card-border)] px-3 py-1 rounded-full shadow-sm">
                     <span>⏱️</span>
                     <span className="font-mono text-amber-500 font-extrabold text-sm">{timeLeft}s</span>
@@ -365,7 +365,12 @@ export default function PlayGamePage() {
 
                 <div className="grid grid-cols-1 gap-3">
                   {currentQuestion.options.map((opt, i) => {
-                    const colors = ["bg-rose-600 hover:bg-rose-700", "bg-blue-600 hover:bg-blue-700", "bg-amber-600 hover:bg-amber-700", "bg-emerald-600 hover:bg-emerald-700"];
+                    const colors = [
+                      "bg-rose-600 hover:bg-rose-700",
+                      "bg-blue-600 hover:bg-blue-700",
+                      "bg-amber-600 hover:bg-amber-700",
+                      "bg-emerald-600 hover:bg-emerald-700",
+                    ];
                     const isSelected = selectedOption === i;
 
                     return (
@@ -373,9 +378,13 @@ export default function PlayGamePage() {
                         key={i}
                         disabled={hasAnswered || session.time_state !== "RODANDO"}
                         onClick={() => handleSelectOption(i)}
-                        className={`w-full p-4 font-bold rounded-2xl text-left text-sm transition flex items-center justify-between cursor-pointer text-white shadow-md ${colors[i % 4]} ${hasAnswered || session.time_state !== "RODANDO" ? "opacity-60 cursor-not-allowed" : ""} ${isSelected ? "ring-4 ring-white scale-[1.02]" : ""}`}
+                        className={`w-full p-4 font-bold rounded-2xl text-left text-sm transition flex items-center justify-between cursor-pointer text-white shadow-md ${colors[i % 4]} ${
+                          hasAnswered || session.time_state !== "RODANDO" ? "opacity-60 cursor-not-allowed" : ""
+                        } ${isSelected ? "ring-4 ring-white scale-[1.02]" : ""}`}
                       >
-                        <span>{String.fromCharCode(65 + i)}. {opt}</span>
+                        <span>
+                          {String.fromCharCode(65 + i)}. {opt}
+                        </span>
                         {isSelected && <span>✔️</span>}
                       </button>
                     );
@@ -387,7 +396,9 @@ export default function PlayGamePage() {
                     <p className="text-emerald-500 font-bold text-sm">{t("answer_registered")}</p>
                     {scoreGained > 0 ? (
                       <div>
-                        <p className="text-xs text-amber-500 font-semibold">🎉 {t("correct")} +{scoreGained} pts</p>
+                        <p className="text-xs text-amber-500 font-semibold">
+                          🎉 {t("correct")} +{scoreGained} pts
+                        </p>
                         {streakBonus > 0 && (
                           <p className="text-[11px] text-amber-500 font-bold mt-1 animate-bounce">
                             🔥 {t("streak_bonus")} (+{streakBonus} pts)!
@@ -404,16 +415,25 @@ export default function PlayGamePage() {
 
             {session.status === "FINALIZADO" && (
               <div className="text-center py-6 space-y-6">
-                <h3 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-yellow-500">{t("game_over")}</h3>
+                <h3 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-yellow-500">
+                  {t("game_over")}
+                </h3>
                 <div className="p-4 bg-[var(--background)] rounded-2xl border border-[var(--card-border)] shadow-sm">
                   <p className="text-xs text-[var(--foreground)] opacity-70 font-bold">{t("final_score")}</p>
                   <p className="text-3xl font-black text-emerald-500 mt-1">{player.score || 0} pts</p>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs text-[var(--foreground)] opacity-70 font-bold uppercase tracking-widest text-left mb-3">{t("top_3")}</p>
+                  <p className="text-xs text-[var(--foreground)] opacity-70 font-bold uppercase tracking-widest text-left mb-3">
+                    {t("top_3")}
+                  </p>
                   {rankedPlayers.slice(0, 3).map((p, idx) => (
-                    <div key={p.id} className="p-3 bg-[var(--background)] border border-[var(--card-border)] rounded-xl flex justify-between items-center text-xs font-semibold shadow-sm">
-                      <span className="text-[var(--foreground)]">{idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉"} {p.player_name}</span>
+                    <div
+                      key={p.id}
+                      className="p-3 bg-[var(--background)] border border-[var(--card-border)] rounded-xl flex justify-between items-center text-xs font-semibold shadow-sm"
+                    >
+                      <span className="text-[var(--foreground)]">
+                        {idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉"} {p.player_name}
+                      </span>
                       <span className="font-mono text-emerald-500 font-bold">{p.score || 0} pts</span>
                     </div>
                   ))}
@@ -426,10 +446,8 @@ export default function PlayGamePage() {
     );
   }
 
-  // TELA DE ENTRADA (INSERIR PIN)
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] font-sans flex flex-col justify-between transition-colors duration-300">
-      
       <div className="bg-slate-900 border-b border-slate-800 transition-none">
         <header className="py-4 px-6">
           <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -441,7 +459,7 @@ export default function PlayGamePage() {
                 Mente<span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400">Afiada</span>
               </span>
             </Link>
-            
+
             <nav className="flex items-center gap-3">
               <LanguageSelector />
               {user && <UserMenu userName={user.firstName || "Aluno"} userRole={userRole} />}
@@ -453,7 +471,9 @@ export default function PlayGamePage() {
       <main className="max-w-md w-full mx-auto px-6 py-12 flex-grow flex items-center justify-center">
         <div className="bg-[var(--card-bg)] w-full rounded-3xl p-8 shadow-2xl border border-[var(--card-border)] text-center transition-colors duration-300">
           <h2 className="text-2xl font-bold text-[var(--foreground)] mb-2">{t("enter_quiz")}</h2>
-          <p className="text-xs text-[var(--foreground)] opacity-70 mb-6 font-semibold">{urlPin ? `${t("connecting_pin")} ${urlPin}` : t("insert_pin")}</p>
+          <p className="text-xs text-[var(--foreground)] opacity-70 mb-6 font-semibold">
+            {urlPin ? `${t("connecting_pin")} ${urlPin}` : t("insert_pin")}
+          </p>
 
           {errorMsg && (
             <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-500 text-xs font-bold shadow-sm">
@@ -502,18 +522,10 @@ export default function PlayGamePage() {
     </div>
   );
 }
-function GamePlayContent() {
-  // O seu código atual da página /game/play (com useSearchParams, estados, etc.)
-  return (
-    <div>
-      {/* ... */}
-    </div>
-  );
-}
 
 export default function GamePlayPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-white">A carregar jogo...</div>}>
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-white bg-slate-900">Carregando jogo...</div>}>
       <GamePlayContent />
     </Suspense>
   );
