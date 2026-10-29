@@ -2,13 +2,12 @@
 
 import { useState } from "react";
 import { useAuth } from "@clerk/nextjs";
-import { useRouter } from "next/navigation";
 import LanguageSelector from "@/app/components/LanguageSelector";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { salvarDataNascimento } from "./actions";
 
 export default function CompletarPerfil() {
-  const { userId, isLoaded } = useAuth();
-  const router = useRouter();
+  const { isLoaded } = useAuth();
   const { t } = useLanguage();
 
   const [dia, setDia] = useState("");
@@ -52,23 +51,17 @@ export default function CompletarPerfil() {
     const dataFormatada = `${ano}-${mes}-${dia}`;
 
     try {
-      const res = await fetch("/api/profile/update-birthdate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data_nascimento: dataFormatada }),
-      });
+      const res = await salvarDataNascimento(dataFormatada);
 
-      const result = await res.json();
-
-      if (res.ok && result.success) {
-        // Redireciona com replace para limpar o histórico e não voltar ao form
-        router.replace("/dashboard/participant");
+      if (res.success) {
+        // Redireciona com recarregamento completo para renovar os metadados de sessão
+        window.location.href = "/dashboard/participant";
       } else {
-        setErrorMessage(result.error || "Erro ao salvar perfil.");
+        setErrorMessage(res.error || "Erro ao salvar perfil.");
         setLoading(false);
       }
     } catch (err) {
-      console.error("Erro na requisição:", err);
+      console.error("Erro na Server Action:", err);
       setErrorMessage("Erro de conexão ao salvar.");
       setLoading(false);
     }
