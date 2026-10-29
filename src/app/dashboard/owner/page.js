@@ -6,10 +6,12 @@ import Link from "next/link";
 import UserMenu from "@/app/components/UserMenu";
 import { useUser } from "@clerk/nextjs";
 import AdminRoomsManager from "@/app/components/AdminRoomsManager";
+import { excluirPerfil } from "./actions";
 
 export default function OwnerDashboard() {
   const { user } = useUser();
   const userName = user?.firstName || "Admin";
+  const currentUserId = user?.id;
 
   // Controle de Seção Principal: 'perfis' ou 'salas'
   const [currentSection, setCurrentSection] = useState("perfis");
@@ -17,6 +19,7 @@ export default function OwnerDashboard() {
   // Estados dos Usuários
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState(null);
   const [activeTab, setActiveTab] = useState("all");
 
   useEffect(() => {
@@ -79,6 +82,28 @@ export default function OwnerDashboard() {
     }
   };
 
+  // Função para deletar um perfil
+  const handleDeleteUser = async (userItem) => {
+    const displayName = userItem.name || userItem.email || "este utilizador";
+    const confirmacao = window.confirm(
+      `Tem certeza de que deseja excluir permanentemente o cadastro de "${displayName}"? Esta ação apagará os dados do banco e o acesso do usuário.`
+    );
+
+    if (!confirmacao) return;
+
+    setDeletingId(userItem.id);
+    const targetClerkId = userItem.clerk_id || userItem.id;
+
+    const res = await excluirPerfil(userItem.id, targetClerkId);
+
+    if (res.success) {
+      setUsers((prev) => prev.filter((u) => u.id !== userItem.id));
+    } else {
+      alert(res.error || "Erro ao excluir perfil.");
+    }
+    setDeletingId(null);
+  };
+
   // Peso de ordenação por cargo: Proprietário -> Criador -> Gestor -> Participante
   const rolePriority = {
     owner: 1,
@@ -124,7 +149,7 @@ export default function OwnerDashboard() {
     participant: users.filter((u) => !u.role || u.role === "participant").length,
   };
 
-  // Ordem reordenada das abas: Proprietários -> Criadores -> Gestores -> Participantes
+  // Ordem das abas: Proprietários -> Criadores -> Gestores -> Participantes
   const tabs = [
     { id: "all", label: "Todos", count: counts.all, icon: "📋" },
     { id: "owner", label: "Proprietários", count: counts.owner, icon: "👑" },
@@ -216,7 +241,7 @@ export default function OwnerDashboard() {
         {/* SEÇÃO 1: GESTÃO DE PERFIS */}
         {currentSection === "perfis" && (
           <div className="space-y-6">
-            {/* NAVEGAÇÃO POR ABAS NA NOVA ORDEM */}
+            {/* NAVEGAÇÃO POR ABAS */}
             <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar">
               {tabs.map((tab) => (
                 <button
@@ -239,7 +264,7 @@ export default function OwnerDashboard() {
               ))}
             </div>
 
-            {/* TABELA DE UTILIZADORES */}
+            {/* TABELA DE UTILIZADORES COM COLUNA DE AÇÕES */}
             <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-800 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
@@ -249,56 +274,82 @@ export default function OwnerDashboard() {
                       <th className="p-4 font-semibold">Email</th>
                       <th className="p-4 font-semibold">Idade (LGPD)</th>
                       <th className="p-4 font-semibold">Cargo (Role)</th>
+                      <th className="p-4 font-semibold text-center">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
                     {loading ? (
                       <tr>
-                        <td colSpan="4" className="p-8 text-center text-slate-400">
+                        <td colSpan="5" className="p-8 text-center text-slate-400">
                           A carregar utilizadores...
                         </td>
                       </tr>
                     ) : filteredUsers.length === 0 ? (
                       <tr>
-                        <td colSpan="4" className="p-8 text-center text-slate-400">
+                        <td colSpan="5" className="p-8 text-center text-slate-400">
                           Nenhum utilizador encontrado nesta categoria.
                         </td>
                       </tr>
                     ) : (
-                      filteredUsers.map((userItem) => (
-                        <tr
-                          key={userItem.id}
-                          className={`transition-all ${getRoleRowStyle(userItem.role)}`}
-                        >
-                          <td className="p-4 font-medium text-slate-900 dark:text-white flex items-center gap-2">
-                            <span>
-                              {userItem.role === "owner" && "👑"}
-                              {userItem.role === "creator" && "🎨"}
-                              {userItem.role === "manager" && "🏢"}
-                              {(!userItem.role || userItem.role === "participant") && "🎓"}
-                            </span>
-                            {userItem.name}
-                          </td>
-                          <td className="p-4 text-sm">{userItem.email}</td>
-                          <td className="p-4 text-sm font-medium">
-                            <span className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono text-xs">
-                              {formatAgeFromBirthdate(userItem.data_nascimento)}
-                            </span>
-                          </td>
-                          <td className="p-4">
-                            <select
-                              value={userItem.role || "participant"}
-                              onChange={(e) => handleRoleChange(userItem.id, e.target.value)}
-                              className="bg-white/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2 cursor-pointer outline-none font-bold backdrop-blur-sm"
-                            >
-                              <option value="owner">👑 Proprietário (Admin)</option>
-                              <option value="creator">🎨 Criador</option>
-                              <option value="manager">🏢 Gestor</option>
-                              <option value="participant">🎓 Participante (Aluno)</option>
-                            </select>
-                          </td>
-                        </tr>
-                      ))
+                      filteredUsers.map((userItem) => {
+                        const isSelf = userItem.clerk_id === currentUserId || userItem.email === user?.primaryEmailAddress?.emailAddress;
+
+                        return (
+                          <tr
+                            key={userItem.id}
+                            className={`transition-all ${getRoleRowStyle(userItem.role)}`}
+                          >
+                            <td className="p-4 font-medium text-slate-900 dark:text-white flex items-center gap-2">
+                              <span>
+                                {userItem.role === "owner" && "👑"}
+                                {userItem.role === "creator" && "🎨"}
+                                {userItem.role === "manager" && "🏢"}
+                                {(!userItem.role || userItem.role === "participant") && "🎓"}
+                              </span>
+                              {userItem.name || "Sem Nome"}
+                            </td>
+                            <td className="p-4 text-sm font-mono text-xs md:text-sm text-slate-600 dark:text-slate-400">{userItem.email}</td>
+                            <td className="p-4 text-sm font-medium">
+                              <span className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono text-xs">
+                                {formatAgeFromBirthdate(userItem.data_nascimento)}
+                              </span>
+                            </td>
+                            <td className="p-4">
+                              <select
+                                value={userItem.role || "participant"}
+                                onChange={(e) => handleRoleChange(userItem.id, e.target.value)}
+                                className="bg-white/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2 cursor-pointer outline-none font-bold backdrop-blur-sm"
+                              >
+                                <option value="owner">👑 Proprietário (Admin)</option>
+                                <option value="creator">🎨 Criador</option>
+                                <option value="manager">🏢 Gestor</option>
+                                <option value="participant">🎓 Participante (Aluno)</option>
+                              </select>
+                            </td>
+                            <td className="p-4 text-center">
+                              {isSelf ? (
+                                <span className="text-xs text-slate-400 italic">Você</span>
+                              ) : (
+                                <button
+                                  onClick={() => handleDeleteUser(userItem)}
+                                  disabled={deletingId === userItem.id}
+                                  className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 hover:text-red-400 border border-red-500/30 rounded-xl text-xs font-bold transition duration-150 cursor-pointer disabled:opacity-50 inline-flex items-center gap-1 shadow-sm"
+                                  title="Excluir perfil permanentemente"
+                                >
+                                  {deletingId === userItem.id ? (
+                                    <span>Apagando...</span>
+                                  ) : (
+                                    <>
+                                      <span>🗑️</span>
+                                      <span>Excluir</span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
