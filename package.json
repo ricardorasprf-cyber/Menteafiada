@@ -7,13 +7,16 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "push": "git add . && git commit -m \"update\" && git push origin main"
+    "push": "git add . && git commit -m \"update\" && git push origin main",
+    "push-drive": "node scripts/upload-drive.js",
+    "watch:push-drive": "node ./scripts/auto-push.js"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.17",
     "@google/genai": "^2.31.0",
     "@supabase/supabase-js": "^2.118.0",
     "canvas-confetti": "^1.9.4",
+    "googleapis": "^188.0.0",
     "next": "16.4.2",
     "qrcode.react": "^4.2.0",
     "react": "19.3.0",

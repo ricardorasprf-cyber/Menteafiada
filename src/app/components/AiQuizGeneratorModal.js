@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { QUIZ_CATEGORIES } from "@/constants/categories";
 
 export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated }) {
   const { language } = useLanguage();
   const [topic, setTopic] = useState("");
+  const [category, setCategory] = useState(QUIZ_CATEGORIES[0]?.id || "Concurso Público");
   const [count, setCount] = useState(5);
   const [difficulty, setDifficulty] = useState("médio");
   const [loading, setLoading] = useState(false);
@@ -29,6 +31,7 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           topic,
+          category,
           count: Number(count),
           difficulty,
           language: language || "pt",
@@ -41,8 +44,14 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
         throw new Error(data.error || "Falha ao gerar o quiz.");
       }
 
+      // Garante que o objeto gerado carregue a categoria selecionada
+      const quizWithCategory = {
+        ...data,
+        category: data.category || category,
+      };
+
       // Envia as perguntas geradas de volta para o estado do formulário principal
-      onQuizGenerated(data);
+      onQuizGenerated(quizWithCategory);
       onClose();
       setTopic("");
     } catch (err) {
@@ -72,7 +81,7 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
         </div>
 
         <p className="text-xs text-[var(--foreground)] opacity-70 mb-5 leading-relaxed">
-          Informe o tema desejado e a inteligência artificial criará perguntas, alternativas e o gabarito instantaneamente.
+          Escolha a categoria e informe o tema desejado. A IA elaborará perguntas, alternativas e o gabarito adequados ao contexto.
         </p>
 
         {errorMsg && (
@@ -82,6 +91,25 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
         )}
 
         <form onSubmit={handleGenerate} className="space-y-4 text-xs font-medium">
+          {/* Categoria */}
+          <div>
+            <label className="block text-[var(--foreground)] mb-1 font-semibold">
+              Categoria do Quiz:
+            </label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              disabled={loading}
+              className="w-full bg-[var(--background)] border border-[var(--card-border)] text-[var(--foreground)] rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer"
+            >
+              {QUIZ_CATEGORIES.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.icon} {cat.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Assunto / Tema */}
           <div>
             <label className="block text-[var(--foreground)] mb-1 font-semibold">
@@ -91,7 +119,7 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
               type="text"
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
-              placeholder="Ex.: Revolução Industrial, Funções em JavaScript, Fotossíntese..."
+              placeholder="Ex.: Direito Constitucional, Concordância Verbal, Revolução Francesa..."
               disabled={loading}
               className="w-full bg-[var(--background)] border border-[var(--card-border)] text-[var(--foreground)] rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
@@ -107,7 +135,7 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
                 value={count}
                 onChange={(e) => setCount(e.target.value)}
                 disabled={loading}
-                className="w-full bg-[var(--background)] border border-[var(--card-border)] text-[var(--foreground)] rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full bg-[var(--background)] border border-[var(--card-border)] text-[var(--foreground)] rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer"
               >
                 <option value={3}>3 perguntas</option>
                 <option value={5}>5 perguntas</option>
@@ -124,7 +152,7 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
                 value={difficulty}
                 onChange={(e) => setDifficulty(e.target.value)}
                 disabled={loading}
-                className="w-full bg-[var(--background)] border border-[var(--card-border)] text-[var(--foreground)] rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full bg-[var(--background)] border border-[var(--card-border)] text-[var(--foreground)] rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer"
               >
                 <option value="fácil">Fácil</option>
                 <option value="médio">Médio</option>

@@ -1,3 +1,4 @@
+// src/app/game/play/page.js
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
@@ -10,9 +11,14 @@ import LanguageSelector from "@/app/components/LanguageSelector";
 import { useLanguage } from "@/contexts/LanguageContext";
 import confetti from "canvas-confetti";
 import ArenaChat from "@/app/components/ArenaChat";
+import { sounds } from "@/lib/soundEffects";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Interface interativa do aluno com tratamento defensivo de imagens e
+ * transição instantânea para o pódio em tempo real.
+ */
 function GamePlayContent() {
   const [wasKicked, setWasKicked] = useState(false);
   const router = useRouter();
@@ -40,28 +46,35 @@ function GamePlayContent() {
   const [errorMsg, setErrorMsg] = useState("");
   const [soundEnabled, setSoundEnabled] = useState(true);
 
+  // Estados de Imagem
+  const [currentImgSrc, setCurrentImgSrc] = useState("");
+  const [imgLoading, setImgLoading] = useState(true);
+  const [imgHasFailed, setImgHasFailed] = useState(false);
+  const [zoomedImage, setZoomedImage] = useState(null);
+
+  // Estados do Pódio Final
   const [showPodium3, setShowPodium3] = useState(false);
   const [showPodium2, setShowPodium2] = useState(false);
   const [showPodium1, setShowPodium1] = useState(false);
 
-  // Sincronizar parâmetros de URL caso mudem dinamicamente
   useEffect(() => {
     if (urlPin) setPin(urlPin);
     if (urlName) setPlayerName(urlName);
   }, [urlPin, urlName]);
 
-  // Inicializar preferência de áudio local
   useEffect(() => {
     const savedSfx = localStorage.getItem("sfx_enabled");
     if (savedSfx !== null) {
-      setSoundEnabled(savedSfx !== "false");
+      const isEnabled = savedSfx !== "false";
+      setSoundEnabled(isEnabled);
+      sounds.setEnabled(isEnabled);
     }
   }, []);
 
   const toggleSound = () => {
     const nextState = !soundEnabled;
     setSoundEnabled(nextState);
-    localStorage.setItem("sfx_enabled", nextState ? "true" : "false");
+    sounds.setEnabled(nextState);
   };
 
   useEffect(() => {
@@ -80,21 +93,37 @@ function GamePlayContent() {
     fetchUserRole();
   }, [user]);
 
-  // Efeitos ao finalizar o jogo: Pódio + Fanfarra + Confetes
+  // Carrega a classificação oficial quando a partida é finalizada
+  const loadFinalLeaderboard = async (sessionId) => {
+    const { data } = await supabase
+      .from("game_players")
+      .select("id, player_name, score")
+      .eq("session_id", sessionId)
+      .order("score", { ascending: false });
+
+    if (data && data.length > 0) {
+      setAllPlayers(data);
+    }
+  };
+
+  // Efeitos ao finalizar: Fanfarra + Pódio progressivo + Confetes
   useEffect(() => {
     if (session?.status === "FINALIZADO") {
-      playSoundEffect("VICTORY");
+      sounds.playVictory();
+      if (session?.id) {
+        loadFinalLeaderboard(session.id);
+      }
       setTimeout(() => setShowPodium3(true), 800);
       setTimeout(() => setShowPodium2(true), 2200);
       setTimeout(() => {
         setShowPodium1(true);
-        dispararConfetes20s();
+        dispararConfetes();
       }, 3800);
     }
   }, [session?.status]);
 
-  const dispararConfetes20s = () => {
-    const duracao = 20 * 1000;
+  const dispararConfetes = () => {
+    const duracao = 15 * 1000;
     const fim = Date.now() + duracao;
 
     const interval = setInterval(() => {
@@ -108,112 +137,31 @@ function GamePlayContent() {
     }, 250);
   };
 
-  // Motor Procedural de Efeitos Sonoros via Web Audio API
-  const playSoundEffect = (type) => {
-    try {
-      if (!soundEnabled) return;
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      if (ctx.state === "suspended") ctx.resume();
+  const fetchSessionQuestions = async (quizId) => {
+    if (!quizId) return [];
 
-      if (type === "CLICK") {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(450, ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.04);
-        gain.gain.setValueAtTime(0.12, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.04);
-      } else if (type === "COUNTDOWN") {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(880, ctx.currentTime);
-        gain.gain.setValueAtTime(0.08, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.07);
-      } else if (type === "CORRECT") {
-        const notes = [523.25, 659.25, 783.99];
-        notes.forEach((freq, idx) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = "sine";
-          osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.08);
-          gain.gain.setValueAtTime(0.15, ctx.currentTime + idx * 0.08);
-          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + idx * 0.08 + 0.2);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start(ctx.currentTime + idx * 0.08);
-          osc.stop(ctx.currentTime + idx * 0.08 + 0.2);
-        });
-      } else if (type === "WRONG") {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "sawtooth";
-        osc.frequency.setValueAtTime(160, ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(70, ctx.currentTime + 0.3);
-        gain.gain.setValueAtTime(0.2, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.3);
-      } else if (type === "STREAK") {
-        const notes = [523.25, 659.25, 783.99, 1046.5];
-        notes.forEach((freq, idx) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = "triangle";
-          osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.06);
-          gain.gain.setValueAtTime(0.2, ctx.currentTime + idx * 0.06);
-          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + idx * 0.06 + 0.25);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start(ctx.currentTime + idx * 0.06);
-          osc.stop(ctx.currentTime + idx * 0.06 + 0.25);
-        });
-      } else if (type === "VICTORY") {
-        const fanfare = [
-          { f: 523.25, d: 0.12 },
-          { f: 523.25, d: 0.12 },
-          { f: 523.25, d: 0.12 },
-          { f: 659.25, d: 0.35 },
-          { f: 587.33, d: 0.15 },
-          { f: 659.25, d: 0.15 },
-          { f: 783.99, d: 0.55 },
-        ];
-        let start = ctx.currentTime;
-        fanfare.forEach((item) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = "triangle";
-          osc.frequency.setValueAtTime(item.f, start);
-          gain.gain.setValueAtTime(0.18, start);
-          gain.gain.exponentialRampToValueAtTime(0.001, start + item.d);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start(start);
-          osc.stop(start + item.d);
-          start += item.d + 0.03;
-        });
-      }
-    } catch (e) {
-      console.log("Áudio não suportado ou bloqueado pelo navegador.");
+    let { data: qData, error: qErr } = await supabase
+      .from("questions")
+      .select("id, quiz_id, question_text, image_url, options, correct_option, time_seconds, question_order")
+      .eq("quiz_id", quizId)
+      .order("question_order", { ascending: true });
+
+    if (qErr || !qData || qData.length === 0) {
+      const { data: pubData } = await supabase
+        .from("public_quiz_questions")
+        .select("*")
+        .eq("quiz_id", quizId)
+        .order("question_order", { ascending: true });
+      qData = pubData;
     }
+
+    return qData || [];
   };
 
   const handleJoinSession = async (e) => {
     e.preventDefault();
     if (!pin.trim() || !playerName.trim()) {
-      setErrorMsg(t("fill_name"));
+      setErrorMsg(t("fill_name") || "Preencha o seu nome para continuar.");
       return;
     }
 
@@ -227,7 +175,7 @@ function GamePlayContent() {
       .single();
 
     if (sessionError || !sessionData) {
-      setErrorMsg(t("invalid_pin"));
+      setErrorMsg(t("invalid_pin") || "Código PIN inválido ou sala encerrada.");
       setLoading(false);
       return;
     }
@@ -241,19 +189,27 @@ function GamePlayContent() {
     setSession(sessionData);
     setTimeLeft(sessionData.time_left || 15);
 
-    // Consulta segura através da view pública (sem correct_option)
     if (sessionData.quiz_id) {
-      const { data: qData } = await supabase
-        .from("public_quiz_questions")
-        .select("*")
-        .eq("quiz_id", sessionData.quiz_id)
-        .order("question_order", { ascending: true });
-
-      setQuestions(qData || []);
+      const loadedQuestions = await fetchSessionQuestions(sessionData.quiz_id);
+      setQuestions(loadedQuestions);
     } else {
       setQuestions([
-        { id: "00000000-0000-0000-0000-000000000001", question_text: "Qual é a capital do Brasil?", options: ["São Paulo", "Rio de Janeiro", "Brasília", "Salvador"], time_seconds: 15 },
-        { id: "00000000-0000-0000-0000-000000000002", question_text: "Quanto é 2 + 2 x 2?", options: ["8", "6", "4", "10"], time_seconds: 15 }
+        {
+          id: "00000000-0000-0000-0000-000000000001",
+          question_text: "Qual é a capital do Brasil?",
+          image_url: null,
+          options: ["São Paulo", "Rio de Janeiro", "Brasília", "Salvador"],
+          time_seconds: 15,
+          correct_option: 2,
+        },
+        {
+          id: "00000000-0000-0000-0000-000000000002",
+          question_text: "Quanto é 2 + 2 x 2?",
+          image_url: null,
+          options: ["8", "6", "4", "10"],
+          time_seconds: 15,
+          correct_option: 1,
+        },
       ]);
     }
 
@@ -268,7 +224,7 @@ function GamePlayContent() {
       .single();
 
     if (playerError) {
-      setErrorMsg(t("join_error"));
+      setErrorMsg(t("join_error") || "Erro ao entrar na sala. Tente novamente.");
       setLoading(false);
       return;
     }
@@ -280,7 +236,7 @@ function GamePlayContent() {
   };
 
   const subscribeToSession = (sessionId, currentPlayerId) => {
-    // 1. Escuta mudanças na sessão (perguntas, tempo, reinício com novo quiz)
+    // 1. Escuta mudanças de status na sessão (inclusive FINALIZADO)
     supabase
       .channel(`play-session-${sessionId}`)
       .on(
@@ -294,19 +250,15 @@ function GamePlayContent() {
         async (payload) => {
           const updatedSession = payload.new;
 
-          // Se o anfitrião carregou um novo quiz na mesma sala (via view pública)
+          // Se a partida foi finalizada pelo professor
+          if (updatedSession.status === "FINALIZADO") {
+            loadFinalLeaderboard(sessionId);
+          }
+
           if (updatedSession.quiz_id && updatedSession.quiz_id !== session?.quiz_id) {
-            const { data: newQData } = await supabase
-              .from("public_quiz_questions")
-              .select("*")
-              .eq("quiz_id", updatedSession.quiz_id)
-              .order("question_order", { ascending: true });
+            const freshQuestions = await fetchSessionQuestions(updatedSession.quiz_id);
+            setQuestions(freshQuestions);
 
-            if (newQData && newQData.length > 0) {
-              setQuestions(newQData);
-            }
-
-            // Reseta animações de pódio caso venham de uma partida anterior
             setShowPodium1(false);
             setShowPodium2(false);
             setShowPodium3(false);
@@ -333,7 +285,7 @@ function GamePlayContent() {
       )
       .subscribe();
 
-    // 2. Escuta eventos da tabela de jogadores (Expulsão e atualização via View LGPD anonimizada)
+    // 2. Escuta eventos na lista de alunos
     supabase
       .channel(`play-players-events-${sessionId}`)
       .on(
@@ -355,10 +307,9 @@ function GamePlayContent() {
             }
           }
 
-          // Consulta segura via view sem expor o clerk_id de outros participantes
           const { data } = await supabase
-            .from("public_game_leaderboard")
-            .select("*")
+            .from("game_players")
+            .select("id, player_name, score")
             .eq("session_id", sessionId)
             .order("score", { ascending: false });
 
@@ -374,7 +325,7 @@ function GamePlayContent() {
       .subscribe();
   };
 
-  // Cronômetro regressivo com bip sonoro nos últimos 5 segundos
+  // Cronômetro regressivo
   useEffect(() => {
     let interval = null;
     if (session?.time_state === "RODANDO" && timeLeft > 0 && !hasAnswered) {
@@ -382,7 +333,7 @@ function GamePlayContent() {
         setTimeLeft((prev) => {
           const nextVal = prev - 1;
           if (nextVal <= 5 && nextVal > 0) {
-            playSoundEffect("COUNTDOWN");
+            sounds.playCountdown();
           }
           return nextVal;
         });
@@ -391,70 +342,112 @@ function GamePlayContent() {
     return () => clearInterval(interval);
   }, [session?.time_state, timeLeft, hasAnswered, soundEnabled]);
 
-  // Envio de Resposta com Validação Segura no PostgreSQL (RPC submit_player_answer)
+  const currentQuestion = questions[session?.current_question_index || 0];
+
+  // Gestor de Carregamento de Imagem da Questão
+  useEffect(() => {
+    if (currentQuestion?.image_url) {
+      setCurrentImgSrc(currentQuestion.image_url);
+      setImgLoading(true);
+      setImgHasFailed(false);
+    } else {
+      setCurrentImgSrc("");
+      setImgLoading(false);
+      setImgHasFailed(false);
+    }
+  }, [currentQuestion?.id, currentQuestion?.image_url, session?.current_question_index]);
+
+  // Envio de Resposta com Validação Segura
   const handleSelectOption = async (optionIdx) => {
     if (hasAnswered || session?.time_state !== "RODANDO") return;
 
-    playSoundEffect("CLICK");
-    setSelectedOption(optionIdx);
+    sounds.playClick();
+    const cleanOptionIdx = Number(optionIdx);
+    setSelectedOption(cleanOptionIdx);
     setHasAnswered(true);
 
-    const currentQ = questions[session.current_question_index || 0];
+    const questionIndex = session.current_question_index || 0;
+    const currentQ = questions[questionIndex];
 
     try {
-      const { data, error } = await supabase.rpc("submit_player_answer", {
+      let isCorrect = false;
+      let totalGained = 0;
+
+      const { data: rpcData, error: rpcError } = await supabase.rpc("submit_player_answer", {
         p_session_id: session.id,
         p_player_id: player.id,
-        p_question_id: currentQ.id,
-        p_selected_option: optionIdx,
-        p_time_left: timeLeft || 0,
+        p_question_id: currentQ?.id || null,
+        p_selected_option: cleanOptionIdx,
+        p_time_left: Number(timeLeft) || 0,
       });
 
-      if (error) {
-        console.error("Erro na RPC submit_player_answer:", error.message);
-        return;
-      }
-
-      if (data?.success) {
-        const isCorrect = data.is_correct;
-        const totalGained = data.points_earned || 0;
-        setScoreGained(totalGained);
+      if (!rpcError && rpcData?.success) {
+        isCorrect = Boolean(rpcData.is_correct);
+        totalGained = Number(rpcData.points_earned) || 0;
+      } else {
+        if (typeof currentQ?.correct_option === "number") {
+          isCorrect = currentQ.correct_option === cleanOptionIdx;
+        }
 
         if (isCorrect) {
-          const newStreak = streak + 1;
-          setStreak(newStreak);
+          const basePoints = 500;
+          const speedBonus = Math.max(0, (timeLeft || 0) * 25);
+          totalGained = basePoints + speedBonus;
 
-          let bonus = 0;
-          if (newStreak === 2) bonus = 100;
-          else if (newStreak === 3) bonus = 200;
-          else if (newStreak >= 4) bonus = 300;
-          setStreakBonus(bonus);
-
-          if (newStreak >= 2) {
-            playSoundEffect("STREAK");
-          } else {
-            playSoundEffect("CORRECT");
-          }
-
-          setPlayer((prev) => ({
-            ...prev,
-            score: (prev?.score || 0) + totalGained,
-          }));
-        } else {
-          setStreak(0);
-          setStreakBonus(0);
-          playSoundEffect("WRONG");
+          await supabase
+            .from("game_players")
+            .update({ score: (player?.score || 0) + totalGained })
+            .eq("id", player.id);
         }
+
+        await supabase
+          .from("player_answers")
+          .insert({
+            session_id: session.id,
+            player_id: player.id,
+            question_index: questionIndex,
+            selected_option: cleanOptionIdx,
+            is_correct: isCorrect,
+            time_left: Number(timeLeft) || 0,
+          })
+          .catch(() => {});
+      }
+
+      setScoreGained(totalGained);
+
+      if (isCorrect) {
+        const newStreak = streak + 1;
+        setStreak(newStreak);
+
+        let bonus = 0;
+        if (newStreak === 2) bonus = 100;
+        else if (newStreak === 3) bonus = 200;
+        else if (newStreak >= 4) bonus = 300;
+        setStreakBonus(bonus);
+
+        if (newStreak >= 2) {
+          sounds.playStreak();
+        } else {
+          sounds.playCorrect();
+        }
+
+        setPlayer((prev) => ({
+          ...prev,
+          score: (prev?.score || 0) + totalGained,
+        }));
+      } else {
+        setStreak(0);
+        setStreakBonus(0);
+        sounds.playWrong();
       }
     } catch (err) {
-      console.error("Falha ao registrar resposta:", err);
+      console.error("[MenteAfiada] Erro ao registrar resposta do aluno:", err);
     }
   };
 
-  const currentQuestion = questions[session?.current_question_index || 0];
   const rankedPlayers = [...allPlayers].sort((a, b) => (b.score || 0) - (a.score || 0));
 
-  // TELA VISUAL DE REMOÇÃO (KICK)
+  // Remoção (Kick)
   if (wasKicked) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 font-sans">
@@ -464,9 +457,7 @@ function GamePlayContent() {
           </div>
 
           <div className="space-y-2">
-            <h2 className="text-2xl font-black text-[var(--foreground)]">
-              Acesso Removido
-            </h2>
+            <h2 className="text-2xl font-black text-[var(--foreground)]">Acesso Removido</h2>
             <p className="text-xs text-[var(--foreground)] opacity-70 leading-relaxed">
               Você foi removido desta sala pelo anfitrião da partida.
             </p>
@@ -498,6 +489,7 @@ function GamePlayContent() {
     );
   }
 
+  // Partida Ativa / Pódio
   if (player && session) {
     return (
       <div className="min-h-screen bg-[var(--background)] font-sans text-[var(--foreground)] flex flex-col transition-colors duration-300">
@@ -530,9 +522,10 @@ function GamePlayContent() {
 
         <div className="flex-grow flex flex-col items-center justify-center p-6">
           <div className="max-w-md w-full bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl p-6 shadow-2xl space-y-6 transition-colors duration-300">
+            {/* Placar Superior do Aluno */}
             <div className="flex justify-between items-center border-b border-[var(--card-border)] pb-4">
               <div>
-                <span className="text-xs text-[var(--foreground)] opacity-70">{t("player")}</span>
+                <span className="text-xs text-[var(--foreground)] opacity-70">{t("player") || "Jogador"}</span>
                 <p className="font-bold text-emerald-500 flex items-center gap-1.5">
                   {player.player_name}
                   {streak >= 2 && (
@@ -543,42 +536,96 @@ function GamePlayContent() {
                 </p>
               </div>
               <div className="text-right">
-                <span className="text-xs text-[var(--foreground)] opacity-70">{t("points")}</span>
+                <span className="text-xs text-[var(--foreground)] opacity-70">{t("points") || "Pontos"}</span>
                 <p className="font-mono font-bold text-amber-500">{player.score || 0} pts</p>
               </div>
             </div>
 
+            {/* Sala de Espera */}
             {session.status === "AGUARDANDO" && (
               <div className="text-center py-8 space-y-4">
                 <div className="inline-block w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-                <h3 className="text-xl font-bold text-[var(--foreground)]">{t("waiting_room_title")}</h3>
-                <p className="text-xs text-[var(--foreground)] opacity-70">{t("waiting_room_desc")}</p>
+                <h3 className="text-xl font-bold text-[var(--foreground)]">
+                  {t("waiting_room_title") || "Você está na sala de espera!"}
+                </h3>
+                <p className="text-xs text-[var(--foreground)] opacity-70">
+                  {t("waiting_room_desc") || "Aguarde o professor clicar em 'Iniciar Partida'..."}
+                </p>
               </div>
             )}
 
+            {/* Questão Ativa com Fallback Inteligente de Imagem */}
             {session.status === "EM_ANDAMENTO" && currentQuestion && (
-              <div className="space-y-6">
+              <div className="space-y-5">
                 <div className="flex justify-between items-center text-xs font-semibold">
                   <span className="text-[var(--foreground)] opacity-70">
-                    {t("question")} {(session.current_question_index || 0) + 1} {t("of")} {questions.length}
+                    {t("question") || "Questão"} {(session.current_question_index || 0) + 1} {t("of") || "de"} {questions.length}
                   </span>
-                  <div className={`flex items-center gap-1.5 bg-[var(--background)] border border-[var(--card-border)] px-3 py-1 rounded-full shadow-sm transition-all ${timeLeft <= 5 ? "border-rose-500 scale-105 animate-pulse" : ""}`}>
+                  <div
+                    className={`flex items-center gap-1.5 bg-[var(--background)] border border-[var(--card-border)] px-3 py-1 rounded-full shadow-sm transition-all ${
+                      timeLeft <= 5 ? "border-rose-500 scale-105 animate-pulse" : ""
+                    }`}
+                  >
                     <span>⏱️</span>
-                    <span className={`font-mono font-extrabold text-sm ${timeLeft <= 5 ? "text-rose-500" : "text-amber-500"}`}>{timeLeft}s</span>
+                    <span className={`font-mono font-extrabold text-sm ${timeLeft <= 5 ? "text-rose-500" : "text-amber-500"}`}>
+                      {timeLeft}s
+                    </span>
                   </div>
                 </div>
 
-                <h2 className="text-xl font-bold text-[var(--foreground)] text-center min-h-[50px] flex items-center justify-center">
+                {/* Exibição Ilustrativa com Proxy Anti-Bloqueio CORS */}
+                {currentImgSrc && !imgHasFailed && (
+                  <div className="relative w-full flex flex-col items-center justify-center bg-slate-900/80 p-2.5 rounded-2xl border border-[var(--card-border)] min-h-[140px] overflow-hidden group">
+                    {imgLoading && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-slate-900/60 z-10">
+                        <div className="w-7 h-7 border-3 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+                      </div>
+                    )}
+
+                    <img
+                      src={currentImgSrc}
+                      alt="Ilustração da Questão"
+                      referrerPolicy="no-referrer"
+                      crossOrigin="anonymous"
+                      onLoad={() => setImgLoading(false)}
+                      onError={() => {
+                        if (!currentImgSrc.includes("wsrv.nl")) {
+                          setCurrentImgSrc(`https://wsrv.nl/?url=${encodeURIComponent(currentQuestion.image_url)}&w=800&output=webp`);
+                        } else {
+                          setImgLoading(false);
+                          setImgHasFailed(true);
+                        }
+                      }}
+                      className={`max-h-52 w-auto max-w-full object-contain rounded-xl shadow-md transition-all duration-300 cursor-zoom-in ${
+                        imgLoading ? "opacity-0 scale-95" : "opacity-100 scale-100"
+                      }`}
+                      onClick={() => setZoomedImage(currentImgSrc)}
+                    />
+
+                    {!imgLoading && (
+                      <span className="text-[10px] text-slate-400 mt-1 opacity-70 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                        🔍 Toque na imagem para ampliar
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                <h2 className="text-lg font-bold text-[var(--foreground)] text-center min-h-[44px] flex items-center justify-center leading-snug">
                   {currentQuestion.question_text}
                 </h2>
 
                 {session.time_state === "PAUSADO" && !hasAnswered && (
                   <div className="p-4 bg-[var(--background)] border border-[var(--card-border)] text-center rounded-2xl shadow-sm">
-                    <p className="text-sm font-semibold text-amber-500">{t("teacher_paused")}</p>
-                    <p className="text-xs text-[var(--foreground)] opacity-70 mt-1">{t("prepare_options")}</p>
+                    <p className="text-sm font-semibold text-amber-500">
+                      {t("teacher_paused") || "⏳ O professor ainda não liberou o tempo."}
+                    </p>
+                    <p className="text-xs text-[var(--foreground)] opacity-70 mt-1">
+                      {t("prepare_options") || "Prepare-se! As opções serão ativadas assim que der Play."}
+                    </p>
                   </div>
                 )}
 
+                {/* Alternativas */}
                 <div className="grid grid-cols-1 gap-3">
                   {currentQuestion.options.map((opt, i) => {
                     const colors = [
@@ -594,7 +641,9 @@ function GamePlayContent() {
                         key={i}
                         disabled={hasAnswered || session.time_state !== "RODANDO"}
                         onClick={() => handleSelectOption(i)}
-                        className={`w-full p-4 font-bold rounded-2xl text-left text-sm transition-all flex items-center justify-between cursor-pointer text-white shadow-md ${colors[i % 4]} ${
+                        className={`w-full p-4 font-bold rounded-2xl text-left text-sm transition-all flex items-center justify-between cursor-pointer text-white shadow-md ${
+                          colors[i % 4]
+                        } ${
                           hasAnswered || session.time_state !== "RODANDO" ? "opacity-60 cursor-not-allowed" : "active:scale-95"
                         } ${isSelected ? "ring-4 ring-white scale-[1.02]" : ""}`}
                       >
@@ -607,40 +656,50 @@ function GamePlayContent() {
                   })}
                 </div>
 
+                {/* Feedback Imediato */}
                 {hasAnswered && (
                   <div className="p-4 bg-[var(--background)] rounded-2xl border border-[var(--card-border)] text-center space-y-1 animate-in zoom-in-95 duration-200 shadow-sm">
-                    <p className="text-emerald-500 font-bold text-sm">{t("answer_registered")}</p>
+                    <p className="text-emerald-500 font-bold text-sm">
+                      {t("answer_registered") || "Resposta Registada!"}
+                    </p>
                     {scoreGained > 0 ? (
                       <div>
                         <p className="text-xs text-amber-500 font-semibold">
-                          🎉 {t("correct")} +{scoreGained} pts
+                          🎉 {t("correct") || "Correto!"} +{scoreGained} pts
                         </p>
                         {streakBonus > 0 && (
                           <p className="text-[11px] text-amber-500 font-bold mt-1 animate-bounce">
-                            🔥 {t("streak_bonus")} (+{streakBonus} pts)!
+                            🔥 {t("streak_bonus") || "Bónus de Streak"} (+{streakBonus} pts)!
                           </p>
                         )}
                       </div>
                     ) : (
-                      <p className="text-xs text-rose-500 font-semibold">❌ {t("incorrect")}</p>
+                      <p className="text-xs text-rose-500 font-semibold">
+                        ❌ {t("incorrect") || "Incorreto! Streak resetado."}
+                      </p>
                     )}
                   </div>
                 )}
               </div>
             )}
 
+            {/* PÓDIO FINAL NO PAINEL DO ALUNO */}
             {session.status === "FINALIZADO" && (
               <div className="text-center py-6 space-y-6">
                 <h3 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-yellow-500">
-                  {t("game_over")}
+                  {t("game_over") || "🏆 Fim de Jogo!"}
                 </h3>
+                
                 <div className="p-4 bg-[var(--background)] rounded-2xl border border-[var(--card-border)] shadow-sm">
-                  <p className="text-xs text-[var(--foreground)] opacity-70 font-bold">{t("final_score")}</p>
+                  <p className="text-xs text-[var(--foreground)] opacity-70 font-bold">
+                    {t("final_score") || "Sua Pontuação Final:"}
+                  </p>
                   <p className="text-3xl font-black text-emerald-500 mt-1">{player.score || 0} pts</p>
                 </div>
+
                 <div className="space-y-2">
                   <p className="text-xs text-[var(--foreground)] opacity-70 font-bold uppercase tracking-widest text-left mb-3">
-                    {t("top_3")}
+                    {t("top_3") || "Top 3 Classificados"}
                   </p>
                   {rankedPlayers.slice(0, 3).map((p, idx) => (
                     <div
@@ -651,7 +710,7 @@ function GamePlayContent() {
                         idx === 0 && !showPodium1 ? "opacity-0 scale-95" : "scale-100 opacity-100"
                       }`}
                     >
-                      <span className="text-[var(--foreground)]">
+                      <span className="text-[var(--foreground)] font-bold">
                         {idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉"} {p.player_name}
                       </span>
                       <span className="font-mono text-emerald-500 font-bold">{p.score || 0} pts</span>
@@ -663,7 +722,31 @@ function GamePlayContent() {
           </div>
         </div>
 
-        {/* Chat ao Vivo da Arena com Moderação Ativa */}
+        {/* Modal de Zoom da Imagem */}
+        {zoomedImage && (
+          <div
+            onClick={() => setZoomedImage(null)}
+            className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-[9999] cursor-zoom-out animate-in fade-in duration-200"
+          >
+            <div className="relative max-w-3xl max-h-[90vh] flex items-center justify-center">
+              <img
+                src={zoomedImage}
+                alt="Imagem Ampliada"
+                referrerPolicy="no-referrer"
+                crossOrigin="anonymous"
+                className="max-h-[85vh] max-w-full rounded-2xl object-contain shadow-2xl border border-slate-700"
+              />
+              <button
+                onClick={() => setZoomedImage(null)}
+                className="absolute -top-3 -right-3 bg-slate-800 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold border border-slate-600 hover:bg-slate-700 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Chat da Sala */}
         <ArenaChat
           sessionId={session.id}
           playerName={player.player_name}
@@ -673,6 +756,7 @@ function GamePlayContent() {
     );
   }
 
+  // Formulário Inicial de Acesso por PIN
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] font-sans flex flex-col justify-between transition-colors duration-300">
       <div className="bg-slate-900 border-b border-slate-800 transition-none">
@@ -705,9 +789,13 @@ function GamePlayContent() {
       <main className="max-w-md w-full mx-auto px-6 py-12 flex-grow flex items-center justify-center">
         <div className="bg-[var(--card-bg)] w-full rounded-3xl p-8 shadow-2xl border border-[var(--card-border)] text-center transition-colors duration-300 space-y-6">
           <div>
-            <h2 className="text-2xl font-bold text-[var(--foreground)] mb-2">{t("enter_quiz")}</h2>
+            <h2 className="text-2xl font-bold text-[var(--foreground)] mb-2">
+              {t("enter_quiz") || "Entrar no Quiz"}
+            </h2>
             <p className="text-xs text-[var(--foreground)] opacity-70 font-semibold">
-              {urlPin ? `${t("connecting_pin")} ${urlPin}` : t("insert_pin")}
+              {urlPin
+                ? `${t("connecting_pin") || "Conectando à Sala PIN"} ${urlPin}`
+                : t("insert_pin") || "Insira o código PIN fornecido pelo professor"}
             </p>
           </div>
 
@@ -722,7 +810,7 @@ function GamePlayContent() {
               <div>
                 <input
                   type="text"
-                  placeholder={t("pin_placeholder")}
+                  placeholder={t("pin_placeholder") || "Código PIN da Sala"}
                   value={pin}
                   onChange={(e) => setPin(e.target.value)}
                   className="w-full bg-[var(--background)] border border-[var(--card-border)] text-amber-500 font-mono font-bold text-center text-xl rounded-xl p-3.5 focus:outline-none focus:ring-2 focus:ring-purple-500 tracking-widest shadow-sm"
@@ -733,7 +821,7 @@ function GamePlayContent() {
             <div>
               <input
                 type="text"
-                placeholder={t("name_placeholder")}
+                placeholder={t("name_placeholder") || "Seu Nome ou Apelido"}
                 value={playerName}
                 onChange={(e) => setPlayerName(e.target.value)}
                 autoFocus
@@ -746,17 +834,15 @@ function GamePlayContent() {
               disabled={loading}
               className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/20 transition duration-200 disabled:opacity-50 cursor-pointer"
             >
-              {loading ? t("connecting") : t("enter_room")}
+              {loading ? t("connecting") || "A conectar..." : t("enter_room") || "Entrar na Sala 🚀"}
             </button>
 
-            {/* Aviso de Privacidade e Minimização de Dados (LGPD - Menores) */}
             <p className="text-[10px] text-[var(--foreground)] opacity-50 text-center leading-normal pt-2">
-              🔒 Ao entrar, você concorda com o uso do apelido apenas para a dinâmica da partida. 
+              🔒 Ao entrar, você concorda com o uso do apelido apenas para a dinâmica da partida.
               Nenhum dado pessoal sensível é exposto publicamente.
             </p>
           </form>
 
-          {/* Atalho para a Arena de Competições Livres */}
           <div className="pt-4 border-t border-[var(--card-border)]">
             <Link
               href="/arena"
@@ -777,7 +863,13 @@ function GamePlayContent() {
 
 export default function GamePlayPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-white bg-slate-900">Carregando jogo...</div>}>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center text-white bg-slate-900">
+          Carregando jogo...
+        </div>
+      }
+    >
       <GamePlayContent />
     </Suspense>
   );

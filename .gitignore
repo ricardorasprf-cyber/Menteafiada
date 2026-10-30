@@ -1,41 +1,49 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# ============================================================================
+# Plataforma Educacional MenteAfiada - Regras de Exclusão Git (.gitignore)
+# ============================================================================
 
-# dependencies
-/node_modules
+# Dependências
+node_modules/
 /.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+.pnp.js
 
-# testing
-/coverage
+# Saídas de compilação Next.js e produção
+.next/
+out/
+build/
+dist/
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
+# Ficheiros de registo (logs)
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# Variáveis de ambiente e ficheiros confidenciais
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# vercel
-.vercel
+# Ficheiros do sistema operativo e configurações de IDE
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# Credenciais do Google Cloud / Supabase / Clerk
+*credenciais*.json
+*credentials*.json
+scripts/*.json
+!scripts/package.json
+scripts/suas-credenciais-google.json
+google-credentials.json
+suas-credenciais-google.json
+
+# Artefactos de consolidação da base de conhecimento da Gem
+base_conhecimento_gem.md
+temp_base.md

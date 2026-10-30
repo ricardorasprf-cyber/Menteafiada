@@ -147,7 +147,7 @@ export default function UserMenu({ userName, userRole }) {
                   onClick={() => setIsOpen(false)}
                   className="flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-slate-500/10 transition-colors"
                 >
-                  <span className="opacity-80">🏅</span> {t("my_achievements") || "Minhas Conquistas"}
+                  <span className="opacity-80">🏅</span> {t("my_achievements") || "Conquistas & Emblemas"}
                 </Link>
             </div>
 

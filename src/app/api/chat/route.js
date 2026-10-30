@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 
 export const dynamic = "force-dynamic";
 
-// Respostas instantâneas para navegação e dúvidas comuns da plataforma
+// Respostas instantâneas padronizadas para dúvidas frequentes de navegabilidade
 const KNOWLEDGE_BASE = {
   pt: {
     jogar: "🎮 **Como jogar um Quiz:**\n\n1. O professor cria e abre uma sala de jogo e partilha o **PIN** de 6 dígitos.\n2. No ecrã inicial (ou em `/game/play`), digite o PIN e o seu nome/apelido.\n3. Aguarde o professor iniciar a partida para responder às perguntas no seu ecrã!",
@@ -27,9 +27,11 @@ const KNOWLEDGE_BASE = {
   }
 };
 
-// Deteta intenções frequentes para resposta imediata
+/**
+ * Deteta intenções mapeadas para responder com latência zero.
+ */
 function matchLocalIntent(text, lang) {
-  const t = (text || "").toLowerCase();
+  const t = (text || "").toLowerCase().trim();
   const dict = KNOWLEDGE_BASE[lang] || KNOWLEDGE_BASE.pt;
 
   if (t.includes("jogar") || t.includes("pin") || t.includes("play") || t.includes("entrar")) return dict.jogar;
@@ -43,12 +45,12 @@ function matchLocalIntent(text, lang) {
 
 export async function POST(req) {
   try {
-    const { messages, language = "pt" } = await req.json();
+    const { messages = [], language = "pt" } = await req.json();
 
-    const lastUserMsg = messages?.filter((m) => m.role === "user").pop();
+    const lastUserMsg = messages.filter((m) => m.role === "user").pop();
     const query = lastUserMsg?.content || "";
 
-    // 1. Resposta local instantânea (elimina 100% dos congelamentos para perguntas frequentes)
+    // 1. Verificação de correspondência local imediata
     const localAnswer = matchLocalIntent(query, language);
     if (localAnswer) {
       return new Response(localAnswer, {
@@ -56,40 +58,77 @@ export async function POST(req) {
       });
     }
 
-    // 2. Se for uma pergunta livre, consulta o Gemini com timeout de segurança
+    // 2. Fallback caso a chave do Gemini não esteja definida
     const apiKey = process.env.GEMINI_API_KEY;
+    const fallbackText = KNOWLEDGE_BASE[language]?.padrao || KNOWLEDGE_BASE.pt.padrao;
+
     if (!apiKey) {
-      const fallback = KNOWLEDGE_BASE[language]?.padrao || KNOWLEDGE_BASE.pt.padrao;
-      return new Response(fallback, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      return new Response(fallbackText, {
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
     }
 
     const ai = new GoogleGenAI({ apiKey });
 
     const systemInstruction = `
-Você é o Afiadinho, assistente virtual da plataforma educacional MenteAfiada.
-Ajude alunos e professores de forma prática, concisa e amigável.
-Idioma obrigatório de resposta: ${language}.
+Você é o Afiadinho, assistente virtual inteligente da plataforma educacional MenteAfiada.
+Objetivo: Orientar alunos e professores de forma prática, amigável, concisa e pedagógica.
+Regras:
+1. Responda estritamente no idioma: ${language}.
+2. Use formatação Markdown (negrito, tópicos e emojis moderados) para organizar as orientações.
+3. Se o utilizador perguntar sobre funcionalidades de gestão ou regras da sala, forneça passos objetivos.
     `;
 
-    // Timeout de 5 segundos para a IA: se a Google estiver congestionada, responde de imediato
-    const fetchWithTimeout = Promise.race([
-      ai.models.generateContent({
-        model: "gemini-3.8-flash",
-        contents: query,
-        config: { systemInstruction, temperature: 0.7 },
-      }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 5000))
-    ]);
+    // 3. Monta o histórico conversacional estruturado para a API do Gemini
+    const contents = messages
+      .filter((m) => m.content && (m.role === "user" || m.role === "assistant"))
+      .slice(-6) // Mantém as últimas 6 interações para controlo de tokens
+      .map((m) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      }));
 
-    const response = await fetchWithTimeout;
-    const reply = response?.text || (KNOWLEDGE_BASE[language]?.padrao || KNOWLEDGE_BASE.pt.padrao);
+    if (contents.length === 0) {
+      contents.push({ role: "user", parts: [{ text: query || "Olá" }] });
+    }
 
-    return new Response(reply, {
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    // 4. Geração em Streaming real para alimentar o leitor do cliente
+    const responseStream = await ai.models.generateContentStream({
+      model: "gemini-2.5-flash",
+      contents: contents,
+      config: {
+        systemInstruction,
+        temperature: 0.6,
+      },
     });
 
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const chunk of responseStream) {
+            const text = chunk.text;
+            if (text) {
+              controller.enqueue(encoder.encode(text));
+            }
+          }
+        } catch (streamErr) {
+          console.error("[Chat Stream Error]:", streamErr);
+          controller.enqueue(encoder.encode(" [Conexão interrompida pelo servidor.]"));
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(readable, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Transfer-Encoding": "chunked",
+      },
+    });
   } catch (err) {
-    console.warn("IA indisponível ou timeout atingido. Ativando resposta de contingência.");
+    console.warn("[Chat Endpoint Warning] Alternando para resposta de contingência:", err.message);
     const fallback = KNOWLEDGE_BASE.pt.padrao;
     return new Response(fallback, {
       headers: { "Content-Type": "text/plain; charset=utf-8" },
