@@ -3,7 +3,7 @@
  * Ferramenta Educacional - Automação de Sincronização Periódica
  * ============================================================================
  * Objetivo: Executar o comando 'npm run push-drive' logo no arranque e,
- *           seguidamente, a cada 5 minutos enquanto o projeto estiver ativo.
+ * seguidamente, a cada 5 minutos enquanto o projeto estiver ativo.
  *
  * Melhorias de UX/Monitorização:
  * - Execução imediata no arranque: Garante confirmação visual no terminal sem
@@ -12,12 +12,12 @@
  * - Saída estruturada e com carimbos de data/hora para auditoria simples.
  */
 
-const { exec } = require('child_process');
+const { exec } = require("child_process");
 
 // Definições de intervalo (5 minutos convertidos para milissegundos)
 const INTERVALO_MINUTOS = 5;
 const INTERVALO_MS = INTERVALO_MINUTOS * 60 * 1000;
-const COMANDO_PUSH = 'npm run push-drive';
+const COMANDO_PUSH = "npm run push-drive";
 
 let emExecucao = false;
 
@@ -27,7 +27,7 @@ let emExecucao = false;
  */
 function obterTimestamp() {
   const agora = new Date();
-  return agora.toLocaleTimeString('pt-PT', { hour12: false });
+  return agora.toLocaleTimeString("pt-BR", { hour12: false });
 }
 
 /**
@@ -64,13 +64,13 @@ function executarSincronizacao() {
 }
 
 // Cabeçalho de confirmação inicial
-console.log(`=======================================================`);
-console.log(`  Sincronizador Periódico para Ambiente de Ensino`);
-console.log(`  Estado: ATIVO`);
-console.log(`  Ciclo de agendamento: A cada ${INTERVALO_MINUTOS} minutos`);
-console.log(`=======================================================`);
+console.log("=======================================================");
+console.log(" Sincronizador Periódico para Ambiente de Ensino");
+console.log(" Estado: ATIVO");
+console.log(` Ciclo de agendamento: A cada ${INTERVALO_MINUTOS} minutos`);
+console.log("=======================================================");
 
-// Execução inicial de confirmação (garante feedback imediato na abertura da pasta)
+// Execução inicial de confirmação
 executarSincronizacao();
 
 // Agendamento das execuções periódicas subsequentes

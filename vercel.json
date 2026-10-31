@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/arena-battle",
+      "schedule": "0 17,19,21,23 * * *"
+    },
+    {
+      "path": "/api/cron/arena-engine",
+      "schedule": "* * * * *"
+    }
+  ]
+}

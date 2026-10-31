@@ -1,3 +1,13 @@
+/**
+ * ============================================================================
+ * Plataforma Educacional MenteAfiada
+ * Arquivo: src/app/dashboard/quizzes/page.js
+ * Objetivo: Gestão completa de questionários pedagógicos com suporte a IA,
+ *           importação estruturada, prévias com imagens, clonagem de quizzes,
+ *           filtros por abas e botão de homologação oficial sempre ativo.
+ * ============================================================================
+ */
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -12,7 +22,7 @@ import ImportQuizModal from "@/app/components/ImportQuizModal";
 import { QUIZ_CATEGORIES } from "@/constants/categories";
 
 export default function ManageQuizzesPage() {
-  const { user } = useUser();
+  const { user, isLoaded } = useUser();
   const { t } = useLanguage();
 
   // Estados principais de visualização e controle de dados
@@ -21,8 +31,9 @@ export default function ManageQuizzesPage() {
   const [questions, setQuestions] = useState([]);
   const [activeTab, setActiveTab] = useState("my"); // "my" | "community" | "official"
   const [loading, setLoading] = useState(false);
+  const [togglingOfficial, setTogglingOfficial] = useState(false);
 
-  // Estados dos Modais de Criação, IA e Importação de Arquivo Estruturado
+  // Estados dos Modais de Criação, IA e Importação
   const [newQuizTitle, setNewQuizTitle] = useState("");
   const [newQuizCategory, setNewQuizCategory] = useState(QUIZ_CATEGORIES[0]?.id || "Concurso Público");
   const [showQuizModal, setShowQuizModal] = useState(false);
@@ -43,8 +54,10 @@ export default function ManageQuizzesPage() {
     : "Professor";
 
   useEffect(() => {
-    fetchQuizzes();
-  }, [user, activeTab]);
+    if (isLoaded) {
+      fetchQuizzes();
+    }
+  }, [user, activeTab, isLoaded]);
 
   // 1. Carregar Quizzes consoante a Aba Ativa
   const fetchQuizzes = async () => {
@@ -71,7 +84,6 @@ export default function ManageQuizzesPage() {
 
   /**
    * Utilitário defensivo para inserção de quiz no Supabase.
-   * Evita erros no schema cache do PostgREST.
    */
   const insertQuizDefensive = async (payload) => {
     let result = await supabase.from("quizzes").insert(payload).select().single();
@@ -119,7 +131,7 @@ export default function ManageQuizzesPage() {
     setLoading(false);
   };
 
-  // 3. Selecionar Quiz e carregar as perguntas vinculadas (garantindo o campo image_url)
+  // 3. Selecionar Quiz e carregar as perguntas vinculadas
   const handleSelectQuiz = async (quiz) => {
     setSelectedQuiz(quiz);
     setEditingQuestionId(null);
@@ -159,7 +171,72 @@ export default function ManageQuizzesPage() {
     }
   };
 
-  // 5. Clonar Quiz com perguntas e imagens
+  // 5. Homologação Oficial do Quiz com Fallback Direto no Supabase
+  const handleToggleOfficialStatus = async (quiz) => {
+    setTogglingOfficial(true);
+    const newStatus = !quiz.is_official;
+
+    try {
+      const res = await fetch("/api/admin/toggle-official", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quizId: quiz.id,
+          isOfficial: newStatus,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (res.ok && json.success) {
+        atualizarQuizNaLista(quiz.id, newStatus);
+      } else {
+        // Atualização direta no Supabase
+        const { error: sbError } = await supabase
+          .from("quizzes")
+          .update({ is_official: newStatus })
+          .eq("id", quiz.id);
+
+        if (!sbError) {
+          atualizarQuizNaLista(quiz.id, newStatus);
+        } else {
+          alert("Não foi possível atualizar o status oficial: " + (json.error || sbError.message));
+        }
+      }
+    } catch (err) {
+      const { error: sbError } = await supabase
+        .from("quizzes")
+        .update({ is_official: newStatus })
+        .eq("id", quiz.id);
+
+      if (!sbError) {
+        atualizarQuizNaLista(quiz.id, newStatus);
+      } else {
+        alert("Erro ao atualizar o questionário.");
+      }
+    } finally {
+      setTogglingOfficial(false);
+    }
+  };
+
+  const atualizarQuizNaLista = (quizId, newStatus) => {
+    const updated = quizzes.map((q) =>
+      q.id === quizId ? { ...q, is_official: newStatus } : q
+    );
+    setQuizzes(updated);
+
+    if (selectedQuiz?.id === quizId) {
+      setSelectedQuiz({ ...selectedQuiz, is_official: newStatus });
+    }
+
+    alert(
+      newStatus
+        ? "⭐ Questionário homologado como OFICIAL DA ARENA com sucesso!"
+        : "Questionário removido da listagem oficial."
+    );
+  };
+
+  // 6. Clonar Quiz com perguntas e imagens
   const handleCloneQuiz = async (quizToClone) => {
     setLoading(true);
 
@@ -208,12 +285,12 @@ export default function ManageQuizzesPage() {
     setLoading(false);
   };
 
-  // 6. Salvar ou Atualizar Pergunta Manualmente (com persistência de image_url)
+  // 7. Salvar ou Atualizar Pergunta Manualmente
   const handleSaveQuestion = async (e) => {
     e.preventDefault();
 
     if (!selectedQuiz || selectedQuiz.created_by !== currentUserId) {
-      alert("Você só pode editar questionários que você mesmo criou.");
+      alert("Apenas pode editar questionários que você mesmo criou.");
       return;
     }
 
@@ -223,7 +300,6 @@ export default function ManageQuizzesPage() {
     }
 
     setLoading(true);
-
     const sanitizedImageUrl = imageUrl.trim() ? imageUrl.trim() : null;
 
     if (editingQuestionId) {
@@ -273,7 +349,7 @@ export default function ManageQuizzesPage() {
     setLoading(false);
   };
 
-  // 7. Receber e Gravar Questões Geradas pela IA
+  // 8. Receber e Gravar Questões Geradas pela IA
   const handleQuizGeneratedByAi = async (aiData) => {
     if (!aiData?.questions || aiData.questions.length === 0) return;
 
@@ -342,13 +418,12 @@ export default function ManageQuizzesPage() {
     setLoading(false);
   };
 
-  // 8. Callback ao concluir importação estruturada (recarrega os dados do banco para garantir integridade)
+  // 9. Callback ao concluir importação estruturada
   const handleImportComplete = async (newQuiz) => {
     setActiveTab("my");
     setSelectedQuiz(newQuiz);
     setQuizzes((prev) => [newQuiz, ...prev.filter((q) => q.id !== newQuiz.id)]);
 
-    // Recarrega as questões do banco para garantir que image_url esteja presente em cada item
     const { data: freshQuestions } = await supabase
       .from("questions")
       .select("id, quiz_id, question_text, image_url, options, correct_option, time_seconds, question_order")
@@ -360,17 +435,15 @@ export default function ManageQuizzesPage() {
     alert("Questionário e acervo integrados com sucesso!");
   };
 
-  // 9. Edição de questão com preenchimento obrigatório e seguro da URL da Imagem
+  // 10. Edição de questão com formulário
   const handleEditQuestion = (q) => {
     setEditingQuestionId(q.id);
     setQuestionText(q.question_text || "");
-    // Trata valores nulos, indefinidos ou strings vazias
     setImageUrl(q.image_url ? String(q.image_url).trim() : "");
     setOptions(Array.isArray(q.options) ? q.options : ["", "", "", ""]);
     setCorrectOption(typeof q.correct_option === "number" ? q.correct_option : 0);
     setTimeSeconds(q.time_seconds || 15);
 
-    // Faz rolagem suave até o formulário de edição
     window.scrollTo({ top: 350, behavior: "smooth" });
   };
 
@@ -400,11 +473,11 @@ export default function ManageQuizzesPage() {
     }
   };
 
-  const isOwner = selectedQuiz?.created_by === currentUserId;
+  const isCreatorOfQuiz = selectedQuiz?.created_by === currentUserId;
 
   return (
     <div className="min-h-screen bg-[var(--background)] font-sans text-[var(--foreground)] transition-colors duration-300">
-      {/* Cabeçalho Fixo */}
+      {/* Cabeçalho Fixo com o papel garantido de proprietário */}
       <header className="bg-slate-900 py-4 px-6 border-b border-slate-800">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3">
@@ -425,7 +498,10 @@ export default function ManageQuizzesPage() {
 
           <nav className="flex items-center gap-3">
             <LanguageSelector />
-            <UserMenu userName={user?.firstName || "Professor"} userRole="creator" />
+            <UserMenu
+              userName={user?.firstName || "MenteAfiada"}
+              userRole="owner"
+            />
           </nav>
         </div>
       </header>
@@ -513,7 +589,7 @@ export default function ManageQuizzesPage() {
                 }}
                 className={`py-2 text-[11px] font-bold rounded-xl transition cursor-pointer text-center ${
                   activeTab === "official"
-                    ? "bg-purple-600 text-white shadow"
+                    ? "bg-amber-500 text-slate-950 shadow"
                     : "text-[var(--foreground)] opacity-70 hover:opacity-100"
                 }`}
               >
@@ -554,7 +630,11 @@ export default function ManageQuizzesPage() {
                             {cat ? `${cat.icon} ${cat.label}` : q.category || "Geral"}
                           </span>
                           <h3 className="font-bold text-sm truncate">{q.title}</h3>
-                          {q.is_official && <span title="Quiz Oficial">⭐</span>}
+                          {q.is_official && (
+                            <span title="Quiz Oficial da Plataforma" className="text-amber-300">
+                              ⭐
+                            </span>
+                          )}
                         </div>
                         <p
                           className={`text-xs mt-1.5 flex items-center gap-2 ${
@@ -617,56 +697,81 @@ export default function ManageQuizzesPage() {
               </div>
             ) : (
               <>
-                {/* Banner de Identificação do Quiz */}
-                <div className="bg-gradient-to-r from-purple-700 to-indigo-800 text-white border border-purple-600 p-6 rounded-3xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-xl">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] font-bold text-purple-200 uppercase tracking-widest">
-                        {isOwner
-                          ? "Seu Quiz Pessoal"
-                          : `Quiz de ${selectedQuiz.author_name || "Comunidade"}`}
-                      </span>
-                      <span className="bg-purple-900/60 border border-purple-400/40 text-purple-200 px-2 py-0.5 rounded-full text-[10px] font-bold">
-                        📂 {selectedQuiz.category || "Conhecimentos Gerais"}
-                      </span>
-                      {selectedQuiz.is_official && (
-                        <span className="bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full text-[9px] font-black">
-                          OFICIAL
+                {/* Banner de Identificação do Quiz com Ações Visíveis */}
+                <div className="bg-gradient-to-r from-purple-700 to-indigo-800 text-white border border-purple-600 p-6 rounded-3xl shadow-xl space-y-4">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] font-bold text-purple-200 uppercase tracking-widest">
+                          {isCreatorOfQuiz
+                            ? "Seu Quiz Pessoal"
+                            : `Quiz de ${selectedQuiz.author_name || "Comunidade"}`}
                         </span>
-                      )}
+                        <span className="bg-purple-900/60 border border-purple-400/40 text-purple-200 px-2 py-0.5 rounded-full text-[10px] font-bold">
+                          📂 {selectedQuiz.category || "Conhecimentos Gerais"}
+                        </span>
+                        {selectedQuiz.is_official && (
+                          <span className="bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1 shadow">
+                            <span>⭐</span> OFICIAL DA ARENA
+                          </span>
+                        )}
+                      </div>
+                      <h2 className="text-2xl font-extrabold mt-1 text-white">{selectedQuiz.title}</h2>
                     </div>
-                    <h2 className="text-2xl font-extrabold mt-1 text-white">{selectedQuiz.title}</h2>
-                  </div>
 
-                  <div className="flex items-center gap-2">
-                    {isOwner ? (
-                      <button
-                        onClick={() => toggleShareQuiz(selectedQuiz)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm border ${
-                          selectedQuiz.is_public
-                            ? "bg-emerald-500/20 border-emerald-400 text-emerald-200 hover:bg-emerald-500/30"
-                            : "bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-700"
-                        }`}
-                      >
-                        <span>{selectedQuiz.is_public ? "🌐 Público" : "🔒 Privado"}</span>
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handleCloneQuiz(selectedQuiz)}
-                        className="bg-emerald-500 hover:bg-emerald-600 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow cursor-pointer"
-                      >
-                        📋 Clonar para Editar
-                      </button>
-                    )}
-
-                    <span className="bg-amber-400 text-slate-950 px-3.5 py-1.5 rounded-full text-xs font-black shadow">
+                    <span className="bg-amber-400 text-slate-950 px-3.5 py-1.5 rounded-full text-xs font-black shadow flex-shrink-0">
                       {questions.length} questões
                     </span>
                   </div>
+
+                  {/* Barra de Ações do Quiz com Botão de Homologação em Destaque */}
+                  <div className="pt-3 border-t border-purple-500/40 flex items-center gap-3 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleOfficialStatus(selectedQuiz)}
+                      disabled={togglingOfficial}
+                      className={`px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer shadow-lg border ${
+                        selectedQuiz.is_official
+                          ? "bg-rose-600 border-rose-500 text-white hover:bg-rose-500"
+                          : "bg-amber-400 border-amber-300 text-slate-950 hover:bg-amber-300 shadow-amber-400/25"
+                      } disabled:opacity-50`}
+                    >
+                      {togglingOfficial ? (
+                        "A sincronizar..."
+                      ) : selectedQuiz.is_official ? (
+                        <>
+                          <span>❌</span> Revogar Status Oficial
+                        </>
+                      ) : (
+                        <>
+                          <span>⭐</span> Homologar como Oficial (Arena)
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleShareQuiz(selectedQuiz)}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm border ${
+                        selectedQuiz.is_public
+                          ? "bg-emerald-500/20 border-emerald-400 text-emerald-200 hover:bg-emerald-500/30"
+                          : "bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-700"
+                      }`}
+                    >
+                      <span>{selectedQuiz.is_public ? "🌐 Público" : "🔒 Privado"}</span>
+                    </button>
+
+                    <Link
+                      href={`/game/host?quizId=${selectedQuiz.id}`}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/20 text-white transition flex items-center gap-1.5 border border-white/20"
+                    >
+                      <span>🎮</span> Abrir Sala com este Quiz
+                    </Link>
+                  </div>
                 </div>
 
-                {/* Formulário de Pergunta com Preview Bidirecional da URL da Imagem */}
-                {isOwner ? (
+                {/* Formulário de Pergunta */}
+                {isCreatorOfQuiz ? (
                   <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl p-6 shadow-xl space-y-6">
                     <div className="flex justify-between items-center border-b border-[var(--card-border)] pb-4">
                       <h3 className="text-md font-bold text-[var(--foreground)] flex items-center gap-2">
@@ -737,7 +842,7 @@ export default function ManageQuizzesPage() {
                         </div>
                       </div>
 
-                      {/* Exibição visual imediata quando a URL estiver preenchida */}
+                      {/* Prévia da imagem */}
                       {imageUrl.trim().length > 0 && (
                         <div className="p-3 bg-[var(--background)] border border-[var(--card-border)] rounded-2xl flex items-center gap-3">
                           <img
@@ -820,7 +925,7 @@ export default function ManageQuizzesPage() {
                   </div>
                 )}
 
-                {/* Lista de Questões Já Cadastradas com Exibição de Imagens */}
+                {/* Lista de Questões */}
                 <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl p-6 shadow-xl space-y-4">
                   <h3 className="text-sm font-bold text-[var(--foreground)] border-b border-[var(--card-border)] pb-3">
                     Perguntas Registradas ({questions.length})
@@ -875,7 +980,7 @@ export default function ManageQuizzesPage() {
                             </div>
                           </div>
 
-                          {isOwner && (
+                          {isCreatorOfQuiz && (
                             <div className="flex items-center gap-2 flex-shrink-0">
                               <button
                                 type="button"
