@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "push": "git add . && git commit -m \"update\" && git push origin main",
+    "push": "git add . && git commit -m \"update\" && git push -u origin main",
     "push-drive": "node scripts/upload-drive.js",
     "watch:push-drive": "node ./scripts/auto-push.js"
   },
