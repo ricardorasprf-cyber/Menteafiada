@@ -1,29 +1,23 @@
 {
-  // ============================================================================
-  // Configuração de Tarefas do Visual Studio Code
-  // Finalidade: Automação em segundo plano para sincronização de ferramentas de ensino
-  // ============================================================================
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Auto Push Drive (5 min)",
-      "type": "shell",
-      "command": "npm run watch:push-drive",
+      "label": "Auto-Push Google Drive (10 min)",
+      "type": "npm",
+      "script": "watch:push-drive",
       "isBackground": true,
-      "runOptions": {
-        // Dispara a execução automaticamente assim que a pasta for aberta no VS Code
-        "runOn": "folderOpen"
-      },
+      "problemMatcher": [],
       "presentation": {
-        // Executa sem forçar a abertura visual do terminal a cada arranque
+        "echo": true,
         "reveal": "silent",
-        // Aloca um painel dedicado no terminal integrado para monitorização
+        "focus": false,
         "panel": "dedicated",
-        "clear": false,
-        "showReuseMessage": false
+        "showReuseMessage": false,
+        "clear": true
       },
-      // Processos de background contínuos dispensam analisadores de problemas
-      "problemMatcher": []
+      "runOptions": {
+        "runOn": "folderOpen"
+      }
     }
   ]
 }

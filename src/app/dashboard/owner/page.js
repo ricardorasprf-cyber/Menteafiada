@@ -1,17 +1,98 @@
+/**
+ * ============================================================================
+ * Plataforma Educacional MenteAfiada
+ * Arquivo: src/app/dashboard/owner/page.js
+ * Objetivo: Painel de Controle do Proprietário integrado ao ThemeProvider
+ * global ("theme-classic", "theme-dark", "theme-synthwave") e ao cabeçalho
+ * unificado (PlatformHeader):
+ * - Gestão de perfis com ordenação hierárquica e sincronização Clerk/Supabase;
+ * - Cálculo de faixa etária em conformidade com a LGPD;
+ * - Alternador entre Gestão de Perfis e Salas & Legado (AdminRoomsManager);
+ * - Suporte dinâmico aos modos Claro, Escuro e NEON.
+ * ============================================================================
+ */
+
 "use client";
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
-import UserMenu from "@/app/components/UserMenu";
 import { useUser } from "@clerk/nextjs";
+import { useTheme } from "@/app/components/ThemeProvider";
 import AdminRoomsManager from "@/app/components/AdminRoomsManager";
 import { excluirPerfil } from "./actions";
 
+// Tokens visuais alinhados às 3 classes globais da plataforma
+const OWNER_STYLES = {
+  "theme-classic": {
+    mainBg: "bg-slate-50 text-slate-900",
+    subBanner:
+      "bg-gradient-to-r from-indigo-50 via-purple-50 to-white border-b border-slate-200 text-slate-900",
+    backLink: "text-slate-600 hover:text-indigo-600",
+    bannerTitle: "text-slate-900",
+    bannerSubtitle: "text-slate-600",
+    moduleSwitchBox: "bg-white border-slate-200 shadow-sm",
+    moduleBtnInactive: "text-slate-600 hover:text-slate-900",
+    tabInactive:
+      "bg-white text-slate-700 hover:bg-slate-100 border-slate-200 shadow-sm",
+    tabInactiveBadge: "bg-slate-100 text-slate-700",
+    tableWrapper:
+      "bg-white border-slate-200 shadow-xl shadow-slate-200/50 text-slate-900",
+    tableHeader: "bg-slate-100/80 border-slate-200 text-slate-600",
+    tableDivider: "divide-slate-100",
+    ageBadge: "bg-slate-100 text-slate-700 border-slate-200",
+    roleSelect:
+      "bg-white border-slate-300 text-slate-900 focus:ring-indigo-500 focus:border-indigo-500",
+  },
+  "theme-dark": {
+    mainBg: "bg-[#070b19] text-slate-100",
+    subBanner:
+      "bg-gradient-to-b from-slate-900 to-[#070b19] border-b border-slate-800 text-white",
+    backLink: "text-slate-400 hover:text-white",
+    bannerTitle: "text-white",
+    bannerSubtitle: "text-slate-400",
+    moduleSwitchBox: "bg-slate-900/90 border-slate-800",
+    moduleBtnInactive: "text-slate-400 hover:text-white",
+    tabInactive:
+      "bg-slate-900/80 text-slate-300 hover:bg-slate-800 hover:text-white border-slate-800",
+    tabInactiveBadge: "bg-slate-800 text-slate-300",
+    tableWrapper:
+      "bg-slate-900/90 border-slate-800 shadow-xl shadow-slate-950/60 text-slate-200",
+    tableHeader: "bg-slate-950/60 border-slate-800 text-slate-400",
+    tableDivider: "divide-slate-800",
+    ageBadge: "bg-slate-800 text-slate-300 border-slate-700",
+    roleSelect:
+      "bg-slate-950 border-slate-700 text-white focus:ring-purple-500 focus:border-purple-500",
+  },
+  "theme-synthwave": {
+    mainBg: "bg-[#03040c] text-cyan-50",
+    subBanner:
+      "bg-gradient-to-r from-fuchsia-950/40 via-[#080c1f] to-cyan-950/30 border-b border-fuchsia-500/30 text-white",
+    backLink: "text-cyan-300/80 hover:text-cyan-200",
+    bannerTitle: "text-white drop-shadow-[0_0_12px_rgba(34,211,238,0.45)]",
+    bannerSubtitle: "text-cyan-100/75",
+    moduleSwitchBox:
+      "bg-[#090d22] border-fuchsia-500/40 shadow-[0_0_20px_rgba(217,70,239,0.2)]",
+    moduleBtnInactive: "text-cyan-200/70 hover:text-cyan-100",
+    tabInactive:
+      "bg-[#090d22]/90 text-cyan-100/80 hover:border-cyan-400/60 hover:text-white border-indigo-500/30",
+    tabInactiveBadge: "bg-[#040612] text-cyan-300 border border-cyan-500/30",
+    tableWrapper:
+      "bg-[#090d22]/95 border-fuchsia-500/40 shadow-[0_0_35px_rgba(192,38,211,0.18)] text-cyan-50",
+    tableHeader: "bg-[#040612] border-fuchsia-500/30 text-cyan-300/80",
+    tableDivider: "divide-indigo-500/20",
+    ageBadge: "bg-[#040612] text-cyan-300 border-cyan-500/30",
+    roleSelect:
+      "bg-[#040612] border-cyan-500/40 text-cyan-100 focus:ring-fuchsia-500 focus:border-fuchsia-500",
+  },
+};
+
 export default function OwnerDashboard() {
   const { user } = useUser();
-  const userName = user?.firstName || "Admin";
+  const { theme } = useTheme();
   const currentUserId = user?.id;
+
+  const styles = OWNER_STYLES[theme] || OWNER_STYLES["theme-classic"];
 
   // Controle de Seção Principal: 'perfis' ou 'salas'
   const [currentSection, setCurrentSection] = useState("perfis");
@@ -58,7 +139,7 @@ export default function OwnerDashboard() {
       return;
     }
 
-    // 2. Sincroniza com os metadados do Clerk para validar no middleware
+    // 2. Sincroniza com os metadados do Clerk para validar no proxy/middleware
     const targetClerkId = targetUser?.clerk_id || targetUser?.id;
 
     if (targetClerkId) {
@@ -155,7 +236,12 @@ export default function OwnerDashboard() {
     { id: "owner", label: "Proprietários", count: counts.owner, icon: "👑" },
     { id: "creator", label: "Criadores", count: counts.creator, icon: "🎨" },
     { id: "manager", label: "Gestores", count: counts.manager, icon: "🏢" },
-    { id: "participant", label: "Participantes", count: counts.participant, icon: "🎓" },
+    {
+      id: "participant",
+      label: "Participantes",
+      count: counts.participant,
+      icon: "🎓",
+    },
   ];
 
   // Formatação Condicional das Linhas
@@ -175,58 +261,70 @@ export default function OwnerDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-[var(--background)] font-sans transition-colors duration-300">
-      <header className="bg-slate-900 pb-20 pt-6 px-6">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-700 bg-white">
-              <img src="/logo-dark.jpeg" alt="Logo MenteAfiada" className="w-full h-full object-cover" />
-            </div>
-            <span className="text-xl font-bold text-white tracking-tight">
-              Mente<span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400">Afiada</span>
-            </span>
-          </Link>
-
-          <div className="flex items-center gap-3">
-            <UserMenu userName={userName} userRole="owner" />
-          </div>
-        </div>
-
-        <div className="max-w-7xl mx-auto mt-8">
-          <Link href="/" className="inline-flex items-center text-sm font-medium text-slate-400 hover:text-white transition-colors mb-6 group">
-            <svg className="w-4 h-4 mr-2 group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+    <div
+      className={`min-h-[calc(100vh-70px)] font-sans transition-colors duration-300 ${styles.mainBg}`}
+    >
+      {/* Sub-Banner Administrativo (Sem duplicar o PlatformHeader global) */}
+      <section
+        className={`pb-16 pt-8 px-6 transition-colors duration-300 ${styles.subBanner}`}
+      >
+        <div className="max-w-7xl mx-auto">
+          <Link
+            href="/"
+            className={`inline-flex items-center text-sm font-medium transition-colors mb-5 group ${styles.backLink}`}
+          >
+            <svg
+              className="w-4 h-4 mr-2 group-hover:-translate-x-1 transition-transform"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M10 19l-7-7m0 0l7-7m-7 7h18"
+              />
             </svg>
             Voltar para a Página Inicial
           </Link>
 
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
-              <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">Painel de Controle do Proprietário</h1>
-              <p className="text-slate-400 text-sm">
-                Gerencie perfis, monitore partidas em tempo real e execute manutenções de legado.
+              <h1
+                className={`text-3xl md:text-4xl font-extrabold mb-2 ${styles.bannerTitle}`}
+              >
+                Painel de Controle do Proprietário
+              </h1>
+              <p className={`text-sm ${styles.bannerSubtitle}`}>
+                Gerencie perfis, monitore partidas em tempo real e execute
+                manutenções de legado.
               </p>
             </div>
 
             {/* Alternador de Módulos (Perfis vs Salas) */}
-            <div className="flex bg-slate-800/90 border border-slate-700 p-1.5 rounded-2xl gap-1">
+            <div
+              className={`flex border p-1.5 rounded-2xl gap-1 self-start md:self-auto ${styles.moduleSwitchBox}`}
+            >
               <button
+                type="button"
                 onClick={() => setCurrentSection("perfis")}
                 className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-2 ${
                   currentSection === "perfis"
                     ? "bg-purple-600 text-white shadow-md"
-                    : "text-slate-400 hover:text-white"
+                    : styles.moduleBtnInactive
                 }`}
               >
                 <span>👥</span> Gestão de Perfis
               </button>
 
               <button
+                type="button"
                 onClick={() => setCurrentSection("salas")}
                 className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-2 ${
                   currentSection === "salas"
                     ? "bg-purple-600 text-white shadow-md"
-                    : "text-slate-400 hover:text-white"
+                    : styles.moduleBtnInactive
                 }`}
               >
                 <span>🎮</span> Salas & Legado
@@ -234,10 +332,9 @@ export default function OwnerDashboard() {
             </div>
           </div>
         </div>
-      </header>
+      </section>
 
       <main className="max-w-7xl mx-auto px-6 -mt-8 pb-20 relative z-10">
-        
         {/* SEÇÃO 1: GESTÃO DE PERFIS */}
         {currentSection === "perfis" && (
           <div className="space-y-6">
@@ -246,18 +343,23 @@ export default function OwnerDashboard() {
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
+                  type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold transition-all whitespace-nowrap cursor-pointer shadow-sm ${
+                  className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold transition-all whitespace-nowrap cursor-pointer border ${
                     activeTab === tab.id
-                      ? "bg-blue-600 text-white shadow-blue-500/20"
-                      : "bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-700/50"
+                      ? "bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-500/25"
+                      : styles.tabInactive
                   }`}
                 >
                   <span>{tab.icon}</span>
                   <span>{tab.label}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    activeTab === tab.id ? "bg-white/20 text-white" : "bg-slate-700 text-slate-300"
-                  }`}>
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full ${
+                      activeTab === tab.id
+                        ? "bg-white/20 text-white"
+                        : styles.tabInactiveBadge
+                    }`}
+                  >
                     {tab.count}
                   </span>
                 </button>
@@ -265,72 +367,104 @@ export default function OwnerDashboard() {
             </div>
 
             {/* TABELA DE UTILIZADORES COM COLUNA DE AÇÕES */}
-            <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-800 overflow-hidden">
+            <div
+              className={`rounded-3xl border overflow-hidden transition-colors duration-300 ${styles.tableWrapper}`}
+            >
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
-                    <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm uppercase tracking-wider">
-                      <th className="p-4 font-semibold">Nome</th>
-                      <th className="p-4 font-semibold">Email</th>
-                      <th className="p-4 font-semibold">Idade (LGPD)</th>
-                      <th className="p-4 font-semibold">Cargo (Role)</th>
-                      <th className="p-4 font-semibold text-center">Ações</th>
+                    <tr
+                      className={`border-b text-xs uppercase tracking-wider ${styles.tableHeader}`}
+                    >
+                      <th className="p-4 font-bold">Nome</th>
+                      <th className="p-4 font-bold">Email</th>
+                      <th className="p-4 font-bold">Idade (LGPD)</th>
+                      <th className="p-4 font-bold">Cargo (Role)</th>
+                      <th className="p-4 font-bold text-center">Ações</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
+                  <tbody className={`divide-y ${styles.tableDivider}`}>
                     {loading ? (
                       <tr>
-                        <td colSpan="5" className="p-8 text-center text-slate-400">
+                        <td
+                          colSpan="5"
+                          className="p-8 text-center opacity-60 font-medium"
+                        >
                           A carregar utilizadores...
                         </td>
                       </tr>
                     ) : filteredUsers.length === 0 ? (
                       <tr>
-                        <td colSpan="5" className="p-8 text-center text-slate-400">
+                        <td
+                          colSpan="5"
+                          className="p-8 text-center opacity-60 font-medium"
+                        >
                           Nenhum utilizador encontrado nesta categoria.
                         </td>
                       </tr>
                     ) : (
                       filteredUsers.map((userItem) => {
-                        const isSelf = userItem.clerk_id === currentUserId || userItem.email === user?.primaryEmailAddress?.emailAddress;
+                        const isSelf =
+                          userItem.clerk_id === currentUserId ||
+                          userItem.email ===
+                            user?.primaryEmailAddress?.emailAddress;
 
                         return (
                           <tr
                             key={userItem.id}
-                            className={`transition-all ${getRoleRowStyle(userItem.role)}`}
+                            className={`transition-all ${getRoleRowStyle(
+                              userItem.role
+                            )}`}
                           >
-                            <td className="p-4 font-medium text-slate-900 dark:text-white flex items-center gap-2">
+                            <td className="p-4 font-bold flex items-center gap-2">
                               <span>
                                 {userItem.role === "owner" && "👑"}
                                 {userItem.role === "creator" && "🎨"}
                                 {userItem.role === "manager" && "🏢"}
-                                {(!userItem.role || userItem.role === "participant") && "🎓"}
+                                {(!userItem.role ||
+                                  userItem.role === "participant") &&
+                                  "🎓"}
                               </span>
-                              {userItem.name || "Sem Nome"}
+                              <span>{userItem.name || "Sem Nome"}</span>
                             </td>
-                            <td className="p-4 text-sm font-mono text-xs md:text-sm text-slate-600 dark:text-slate-400">{userItem.email}</td>
+                            <td className="p-4 font-mono text-xs md:text-sm opacity-80">
+                              {userItem.email}
+                            </td>
                             <td className="p-4 text-sm font-medium">
-                              <span className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono text-xs">
-                                {formatAgeFromBirthdate(userItem.data_nascimento)}
+                              <span
+                                className={`px-2.5 py-1 rounded-md border font-mono text-xs ${styles.ageBadge}`}
+                              >
+                                {formatAgeFromBirthdate(
+                                  userItem.data_nascimento
+                                )}
                               </span>
                             </td>
                             <td className="p-4">
                               <select
                                 value={userItem.role || "participant"}
-                                onChange={(e) => handleRoleChange(userItem.id, e.target.value)}
-                                className="bg-white/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2 cursor-pointer outline-none font-bold backdrop-blur-sm"
+                                onChange={(e) =>
+                                  handleRoleChange(userItem.id, e.target.value)
+                                }
+                                className={`border text-sm rounded-lg block w-full p-2 cursor-pointer outline-none font-bold backdrop-blur-sm ${styles.roleSelect}`}
                               >
-                                <option value="owner">👑 Proprietário (Admin)</option>
+                                <option value="owner">
+                                  👑 Proprietário (Admin)
+                                </option>
                                 <option value="creator">🎨 Criador</option>
                                 <option value="manager">🏢 Gestor</option>
-                                <option value="participant">🎓 Participante (Aluno)</option>
+                                <option value="participant">
+                                  🎓 Participante (Aluno)
+                                </option>
                               </select>
                             </td>
                             <td className="p-4 text-center">
                               {isSelf ? (
-                                <span className="text-xs text-slate-400 italic">Você</span>
+                                <span className="text-xs opacity-50 italic font-semibold">
+                                  Você
+                                </span>
                               ) : (
                                 <button
+                                  type="button"
                                   onClick={() => handleDeleteUser(userItem)}
                                   disabled={deletingId === userItem.id}
                                   className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 hover:text-red-400 border border-red-500/30 rounded-xl text-xs font-bold transition duration-150 cursor-pointer disabled:opacity-50 inline-flex items-center gap-1 shadow-sm"
@@ -364,7 +498,6 @@ export default function OwnerDashboard() {
             <AdminRoomsManager />
           </div>
         )}
-
       </main>
     </div>
   );

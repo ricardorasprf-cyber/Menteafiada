@@ -2,9 +2,9 @@
  * ============================================================================
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/api/cron/arena-engine/route.js
- * Objetivo: Motor de controle da Arena que verifica o tempo de início,
- *           avança perguntas a cada 60 segundos, encerra a partida no pódio
- *           e grava o histórico permanente de participantes para premiações.
+ * Objetivo: Motor de controle da Arena que respeita a janela de concentração
+ * de 5 minutos (300 segundos) antes do início oficial, avança perguntas a
+ * cada 60 segundos, encerra a partida no pódio e grava o histórico.
  * ============================================================================
  */
 
@@ -12,6 +12,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
+
+// Janela de concentração antes de iniciar a 1ª pergunta: 5 minutos (300s)
+const PRE_START_WINDOW_SECONDS = 300;
 
 export async function GET() {
   try {
@@ -30,7 +33,6 @@ export async function GET() {
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
     const agora = new Date();
 
-    // 1. Busca salas da Arena ativas ('waiting' ou 'in_progress')
     const { data: salasArena, error: salasError } = await supabaseAdmin
       .from("game_rooms")
       .select(`
@@ -51,7 +53,9 @@ export async function GET() {
       .in("status", ["waiting", "in_progress"]);
 
     if (salasError || !salasArena || salasArena.length === 0) {
-      return NextResponse.json({ message: "Nenhuma batalha ativa na Arena no momento." });
+      return NextResponse.json({
+        message: "Nenhuma batalha ativa na Arena no momento.",
+      });
     }
 
     const atualizacoes = [];
@@ -60,12 +64,12 @@ export async function GET() {
       const totalPerguntas = sala.quizzes?.questions?.length || 0;
       const indexAtual = sala.current_question_index || 0;
 
-      // Se a sala estiver aguardando, inicia após 60 segundos de concentração
+      // 1. Sala aguardando na janela de concentração de 5 minutos (300 segundos)
       if (sala.status === "waiting") {
         const tempoCriacao = new Date(sala.created_at).getTime();
         const decorridoEspera = (agora.getTime() - tempoCriacao) / 1000;
 
-        if (decorridoEspera >= 60) {
+        if (decorridoEspera >= PRE_START_WINDOW_SECONDS) {
           await supabaseAdmin
             .from("game_rooms")
             .update({
@@ -75,64 +79,63 @@ export async function GET() {
             })
             .eq("id", sala.id);
 
-          atualizacoes.push({ pin: sala.pin, acao: "Batalha iniciada automaticamente" });
+          atualizacoes.push({
+            pin: sala.pin,
+            acao: "Partida iniciada após 5 minutos de concentração",
+          });
         }
+        continue;
       }
 
-      // Se a sala estiver em andamento, verifica se já passaram 60 segundos
-      else if (sala.status === "in_progress") {
-        const inicioPergunta = sala.question_started_at
+      // 2. Sala em andamento: avança a cada 60 segundos
+      if (sala.status === "in_progress") {
+        const inicioQuestao = sala.question_started_at
           ? new Date(sala.question_started_at).getTime()
           : agora.getTime();
+        const decorridoQuestao = (agora.getTime() - inicioQuestao) / 1000;
 
-        const segundosPassados = (agora.getTime() - inicioPergunta) / 1000;
+        if (decorridoQuestao >= 60) {
+          const proximoIndice = indexAtual + 1;
 
-        if (segundosPassados >= 60) {
-          const proximoIndex = indexAtual + 1;
-
-          if (proximoIndex < totalPerguntas) {
-            // Avança para a próxima pergunta
+          if (proximoIndice < totalPerguntas) {
             await supabaseAdmin
               .from("game_rooms")
               .update({
-                current_question_index: proximoIndex,
+                current_question_index: proximoIndice,
                 question_started_at: agora.toISOString(),
               })
               .eq("id", sala.id);
 
             atualizacoes.push({
               pin: sala.pin,
-              acao: `Avançou para questão #${proximoIndex + 1}`,
+              acao: `Avançou para questão ${proximoIndice + 1}/${totalPerguntas}`,
             });
           } else {
-            // Concluiu todas as perguntas -> Finaliza a sala
+            // Encerra a partida e grava o pódio histórico
             await supabaseAdmin
               .from("game_rooms")
               .update({
                 status: "finished",
+                finished_at: agora.toISOString(),
               })
               .eq("id", sala.id);
 
-            // 2. Gravação de Auditoria e Registro Fiel dos Participantes
-            const { data: jogadores } = await supabaseAdmin
-              .from("game_players")
-              .select("id, player_name, score, clerk_id")
+            const { data: participantes } = await supabaseAdmin
+              .from("game_room_players")
+              .select("*")
               .eq("room_id", sala.id)
               .order("score", { ascending: false });
 
-            if (jogadores && jogadores.length > 0) {
-              const registrosHistorico = jogadores.map((jogador, idx) => ({
+            if (participantes && participantes.length > 0) {
+              const registrosHistorico = participantes.map((p, idx) => ({
                 room_id: sala.id,
                 pin: sala.pin,
-                quiz_id: sala.quiz_id,
-                quiz_title: sala.quizzes?.title || "Batalha Arena",
-                clerk_id: jogador.clerk_id || null,
-                player_name: jogador.player_name,
-                score: jogador.score || 0,
-                final_rank: idx + 1,
+                quiz_title: sala.quizzes?.title || "Batalha Oficial",
+                player_name: p.player_name,
+                clerk_id: p.clerk_id || null,
+                score: p.score || 0,
+                rank_position: idx + 1,
                 is_podium: idx < 3,
-                eligible_for_reward: true,
-                reward_claimed: false,
                 participated_at: agora.toISOString(),
               }));
 
@@ -143,7 +146,7 @@ export async function GET() {
 
             atualizacoes.push({
               pin: sala.pin,
-              acao: "Batalha finalizada -> Histórico permanente registrado",
+              acao: "Partida encerrada e pódio registrado",
             });
           }
         }
@@ -152,7 +155,7 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      salasProcessadas: salasArena.length,
+      processadas: salasArena.length,
       atualizacoes,
     });
   } catch (err) {

@@ -2,8 +2,9 @@
  * ============================================================================
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/api/cron/arena-battle/route.js
- * Objetivo: Rotina agendada para sortear um quiz oficial e criar automaticamente
- *           uma sala de batalha na Arena às 14h, 16h, 18h e 20h.
+ * Objetivo: Rotina agendada (e sob demanda na janela de 5 min antes) para
+ * sortear um quiz oficial e abrir a sala da Arena com 5 minutos de
+ * antecedência às rodadas oficiais (14h, 16h, 18h e 20h - Brasília).
  * ============================================================================
  */
 
@@ -12,17 +13,20 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
-// Gera um PIN numérico aleatório de 6 dígitos para os alunos entrarem na sala
 function gerarPinSala() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
 export async function GET(req) {
   try {
+    const { searchParams } = new URL(req.url);
+    const isPreOpenTrigger = searchParams.get("preopen") === "1";
+
     const authHeader = req.headers.get("authorization");
     const cronSecret = process.env.CRON_SECRET;
 
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    // Permite chamada autenticada pelo Cron OU gatilho automático da janela de 5 min
+    if (cronSecret && !isPreOpenTrigger && authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "Acesso não autorizado." }, { status: 401 });
     }
 
@@ -40,19 +44,38 @@ export async function GET(req) {
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
-    // 1. Busca todos os questionários cadastrados como oficiais
-    let { data: officialQuizzes, error: quizError } = await supabaseAdmin
+    // 1. Verifica se já existe uma sala da Arena aberta ('waiting' ou 'in_progress')
+    // Evita duplicidade caso o aluno abra a página durante os 5 minutos anteriores
+    const { data: salasExistentes } = await supabaseAdmin
+      .from("game_rooms")
+      .select("id, pin, quiz_id, title, status, created_at")
+      .eq("is_arena", true)
+      .in("status", ["waiting", "in_progress"])
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (salasExistentes && salasExistentes.length > 0) {
+      return NextResponse.json({
+        success: true,
+        alreadyOpen: true,
+        message: "Sala oficial da Arena já está aberta para entrada.",
+        room: salasExistentes[0],
+        pin: salasExistentes[0].pin,
+        arenaUrl: `/arena/${salasExistentes[0].pin}`,
+      });
+    }
+
+    // 2. Busca questionários cadastrados como oficiais
+    let { data: officialQuizzes } = await supabaseAdmin
       .from("quizzes")
       .select("id, title, category")
       .eq("is_official", true);
 
-    // Fallback: se nenhum quiz estiver marcado como oficial, seleciona o primeiro disponível
     if (!officialQuizzes || officialQuizzes.length === 0) {
       const { data: allQuizzes } = await supabaseAdmin
         .from("quizzes")
         .select("id, title, category")
         .limit(5);
-
       officialQuizzes = allQuizzes || [];
     }
 
@@ -63,19 +86,18 @@ export async function GET(req) {
       });
     }
 
-    // 2. Realiza o sorteio aleatório de um quiz
-    const sorteado = officialQuizzes[Math.floor(Math.random() * officialQuizzes.length)];
-
-    // 3. Gera o PIN numérico exclusivo de 6 dígitos
+    // 3. Sorteia aleatoriamente um quiz e gera PIN exclusivo
+    const sorteado =
+      officialQuizzes[Math.floor(Math.random() * officialQuizzes.length)];
     const pinGerado = gerarPinSala();
 
-    // 4. Cria o registro da sala de jogo oficial da Arena
+    // 4. Cria a sala em status 'waiting' (janela de 5 minutos antes do início)
     const { data: novaSala, error: salaError } = await supabaseAdmin
       .from("game_rooms")
       .insert({
         pin: pinGerado,
         quiz_id: sorteado.id,
-        status: "waiting", // Aberta aguardando participantes
+        status: "waiting",
         is_arena: true,
         title: `Batalha Oficial: ${sorteado.title}`,
         host_name: "Sistema Educacional (Arena Automática)",
@@ -83,7 +105,7 @@ export async function GET(req) {
         question_started_at: new Date().toISOString(),
         created_at: new Date().toISOString(),
       })
-      .select("id, pin, quiz_id, title, status")
+      .select("id, pin, quiz_id, title, status, created_at")
       .single();
 
     if (salaError) {
@@ -93,7 +115,7 @@ export async function GET(req) {
 
     return NextResponse.json({
       success: true,
-      message: "Batalha da Arena criada com sucesso.",
+      message: "Sala da Arena aberta com 5 minutos de antecedência.",
       room: novaSala,
       pin: novaSala.pin,
       arenaUrl: `/arena/${novaSala.pin}`,

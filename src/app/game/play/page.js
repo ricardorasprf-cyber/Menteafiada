@@ -1,4 +1,17 @@
-// src/app/game/play/page.js
+/**
+ * ============================================================================
+ * Plataforma Educacional MenteAfiada
+ * Arquivo: src/app/game/play/page.js
+ * Objetivo: Interface interativa do aluno com correção de validação de resposta
+ * e gravação garantida em player_answers e game_players:
+ * 1. Múltipla Escolha (com normalização numérica de correct_option);
+ * 2. Completar Lacunas ("___") com palavras sugeridas em sequência;
+ * 3. Ordenação Sequencial / Procedimental;
+ * 4. Verdadeiro ou Falso Relâmpago;
+ * 5. Nuvem de Palavras e Termômetro de Compreensão ao vivo.
+ * ============================================================================
+ */
+
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
@@ -6,32 +19,101 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
-import UserMenu from "@/app/components/UserMenu";
-import LanguageSelector from "@/app/components/LanguageSelector";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useTheme } from "@/app/components/ThemeProvider";
 import confetti from "canvas-confetti";
 import ArenaChat from "@/app/components/ArenaChat";
+import LiveWordCloud from "@/app/components/LiveWordCloud";
+import QuickPulseOverlay from "@/app/components/QuickPulseOverlay";
+import FillBlanksPlayer from "@/app/components/FillBlanksPlayer";
+import SequenceOrderingPlayer from "@/app/components/SequenceOrderingPlayer";
 import { sounds } from "@/lib/soundEffects";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Interface interativa do aluno com tratamento defensivo de imagens e
- * transição instantânea para o pódio em tempo real.
- */
+// Normalizador defensivo: garante leitura correta mesmo se options vier serializado como string
+function parseQuestionOptions(rawOptions) {
+  let parsed = rawOptions;
+  if (typeof rawOptions === "string") {
+    try {
+      parsed = JSON.parse(rawOptions);
+    } catch {
+      parsed = [];
+    }
+  }
+
+  if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
+    return {
+      type: parsed.type || "multiple_choice",
+      data: parsed,
+    };
+  }
+
+  return {
+    type: "multiple_choice",
+    data: Array.isArray(parsed) ? parsed : [],
+  };
+}
+
+const PLAY_STYLES = {
+  "theme-classic": {
+    mainBg: "bg-slate-50 text-slate-900",
+    card: "bg-white border-slate-200 shadow-2xl shadow-slate-200/60 text-slate-900",
+    subBox: "bg-slate-50 border-slate-200 text-slate-900",
+    input:
+      "bg-slate-50 border-slate-300 text-slate-900 focus:ring-indigo-500",
+    pinInput:
+      "bg-slate-50 border-slate-300 text-indigo-600 focus:ring-indigo-500",
+    soundBtn:
+      "bg-white border-slate-300 text-slate-700 hover:border-indigo-400 shadow-sm",
+    imageWrapper: "bg-slate-100 border-slate-200",
+    footer: "bg-white border-slate-200 text-slate-500",
+  },
+  "theme-dark": {
+    mainBg: "bg-[#070b19] text-slate-100",
+    card: "bg-slate-900/95 border-slate-800 shadow-2xl shadow-slate-950/60 text-slate-100",
+    subBox: "bg-slate-950/80 border-slate-800 text-slate-100",
+    input:
+      "bg-slate-950 border-slate-800 text-slate-100 focus:ring-purple-500",
+    pinInput:
+      "bg-slate-950 border-slate-800 text-amber-400 focus:ring-purple-500",
+    soundBtn:
+      "bg-slate-900 border-slate-800 text-slate-200 hover:bg-slate-800",
+    imageWrapper: "bg-slate-950/90 border-slate-800",
+    footer: "bg-[#070b19] border-slate-800/80 text-slate-500",
+  },
+  "theme-synthwave": {
+    mainBg: "bg-[#03040c] text-cyan-50",
+    card: "bg-[#090d22]/95 border-fuchsia-500/40 shadow-[0_0_40px_rgba(217,70,239,0.2)] text-cyan-50",
+    subBox: "bg-[#040612]/90 border-cyan-500/30 text-cyan-50",
+    input:
+      "bg-[#040612] border-cyan-500/40 text-cyan-100 focus:ring-fuchsia-500",
+    pinInput:
+      "bg-[#040612] border-cyan-500/50 text-cyan-300 focus:ring-fuchsia-500 shadow-[inset_0_0_12px_rgba(34,211,238,0.12)]",
+    soundBtn:
+      "bg-[#0b0f26] border-cyan-500/40 text-cyan-300 hover:border-fuchsia-400 shadow-[0_0_15px_rgba(34,211,238,0.15)]",
+    imageWrapper: "bg-[#040612] border-cyan-500/30",
+    footer: "bg-[#03040c] border-fuchsia-500/20 text-cyan-200/50",
+  },
+};
+
 function GamePlayContent() {
   const [wasKicked, setWasKicked] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useUser();
   const { t } = useLanguage();
+  const { theme } = useTheme();
+
+  const styles = PLAY_STYLES[theme] || PLAY_STYLES["theme-classic"];
 
   const urlPin = searchParams.get("pin") || "";
   const urlName = searchParams.get("name") || "";
 
   const [pin, setPin] = useState(urlPin);
-  const [playerName, setPlayerName] = useState(urlName || user?.firstName || "");
-  const [userRole, setUserRole] = useState("participant");
+  const [playerName, setPlayerName] = useState(
+    urlName || user?.firstName || ""
+  );
   const [session, setSession] = useState(null);
   const [player, setPlayer] = useState(null);
   const [allPlayers, setAllPlayers] = useState([]);
@@ -46,13 +128,11 @@ function GamePlayContent() {
   const [errorMsg, setErrorMsg] = useState("");
   const [soundEnabled, setSoundEnabled] = useState(true);
 
-  // Estados de Imagem
   const [currentImgSrc, setCurrentImgSrc] = useState("");
   const [imgLoading, setImgLoading] = useState(true);
   const [imgHasFailed, setImgHasFailed] = useState(false);
   const [zoomedImage, setZoomedImage] = useState(null);
 
-  // Estados do Pódio Final
   const [showPodium3, setShowPodium3] = useState(false);
   const [showPodium2, setShowPodium2] = useState(false);
   const [showPodium1, setShowPodium1] = useState(false);
@@ -61,6 +141,12 @@ function GamePlayContent() {
     if (urlPin) setPin(urlPin);
     if (urlName) setPlayerName(urlName);
   }, [urlPin, urlName]);
+
+  useEffect(() => {
+    if (!urlName && user?.firstName && !playerName) {
+      setPlayerName(user.firstName);
+    }
+  }, [user, urlName, playerName]);
 
   useEffect(() => {
     const savedSfx = localStorage.getItem("sfx_enabled");
@@ -77,23 +163,6 @@ function GamePlayContent() {
     sounds.setEnabled(nextState);
   };
 
-  useEffect(() => {
-    const fetchUserRole = async () => {
-      if (user?.id) {
-        const { data } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("clerk_id", user.id)
-          .single();
-        if (data?.role) {
-          setUserRole(data.role);
-        }
-      }
-    };
-    fetchUserRole();
-  }, [user]);
-
-  // Carrega a classificação oficial quando a partida é finalizada
   const loadFinalLeaderboard = async (sessionId) => {
     const { data } = await supabase
       .from("game_players")
@@ -106,7 +175,6 @@ function GamePlayContent() {
     }
   };
 
-  // Efeitos ao finalizar: Fanfarra + Pódio progressivo + Confetes
   useEffect(() => {
     if (session?.status === "FINALIZADO") {
       sounds.playVictory();
@@ -132,8 +200,18 @@ function GamePlayContent() {
         return clearInterval(interval);
       }
 
-      confetti({ particleCount: 25, angle: 60, spread: 55, origin: { x: 0, y: 0.7 } });
-      confetti({ particleCount: 25, angle: 120, spread: 55, origin: { x: 1, y: 0.7 } });
+      confetti({
+        particleCount: 25,
+        angle: 60,
+        spread: 55,
+        origin: { x: 0, y: 0.7 },
+      });
+      confetti({
+        particleCount: 25,
+        angle: 120,
+        spread: 55,
+        origin: { x: 1, y: 0.7 },
+      });
     }, 250);
   };
 
@@ -142,7 +220,9 @@ function GamePlayContent() {
 
     let { data: qData, error: qErr } = await supabase
       .from("questions")
-      .select("id, quiz_id, question_text, image_url, options, correct_option, time_seconds, question_order")
+      .select(
+        "id, quiz_id, question_text, image_url, options, correct_option, time_seconds, question_order"
+      )
       .eq("quiz_id", quizId)
       .order("question_order", { ascending: true });
 
@@ -202,14 +282,6 @@ function GamePlayContent() {
           time_seconds: 15,
           correct_option: 2,
         },
-        {
-          id: "00000000-0000-0000-0000-000000000002",
-          question_text: "Quanto é 2 + 2 x 2?",
-          image_url: null,
-          options: ["8", "6", "4", "10"],
-          time_seconds: 15,
-          correct_option: 1,
-        },
       ]);
     }
 
@@ -236,7 +308,6 @@ function GamePlayContent() {
   };
 
   const subscribeToSession = (sessionId, currentPlayerId) => {
-    // 1. Escuta mudanças de status na sessão (inclusive FINALIZADO)
     supabase
       .channel(`play-session-${sessionId}`)
       .on(
@@ -250,13 +321,17 @@ function GamePlayContent() {
         async (payload) => {
           const updatedSession = payload.new;
 
-          // Se a partida foi finalizada pelo professor
           if (updatedSession.status === "FINALIZADO") {
             loadFinalLeaderboard(sessionId);
           }
 
-          if (updatedSession.quiz_id && updatedSession.quiz_id !== session?.quiz_id) {
-            const freshQuestions = await fetchSessionQuestions(updatedSession.quiz_id);
+          if (
+            updatedSession.quiz_id &&
+            updatedSession.quiz_id !== session?.quiz_id
+          ) {
+            const freshQuestions = await fetchSessionQuestions(
+              updatedSession.quiz_id
+            );
             setQuestions(freshQuestions);
 
             setShowPodium1(false);
@@ -269,7 +344,8 @@ function GamePlayContent() {
           setSession((prevSession) => {
             if (
               prevSession &&
-              (prevSession.current_question_index !== updatedSession.current_question_index ||
+              (prevSession.current_question_index !==
+                updatedSession.current_question_index ||
                 prevSession.status !== updatedSession.status ||
                 prevSession.quiz_id !== updatedSession.quiz_id)
             ) {
@@ -285,7 +361,6 @@ function GamePlayContent() {
       )
       .subscribe();
 
-    // 2. Escuta eventos na lista de alunos
     supabase
       .channel(`play-players-events-${sessionId}`)
       .on(
@@ -325,7 +400,6 @@ function GamePlayContent() {
       .subscribe();
   };
 
-  // Cronômetro regressivo
   useEffect(() => {
     let interval = null;
     if (session?.time_state === "RODANDO" && timeLeft > 0 && !hasAnswered) {
@@ -343,8 +417,10 @@ function GamePlayContent() {
   }, [session?.time_state, timeLeft, hasAnswered, soundEnabled]);
 
   const currentQuestion = questions[session?.current_question_index || 0];
+  const parsedCurrentOptions = parseQuestionOptions(currentQuestion?.options);
+  const currentQuestionType = parsedCurrentOptions.type;
+  const currentOptionsData = parsedCurrentOptions.data;
 
-  // Gestor de Carregamento de Imagem da Questão
   useEffect(() => {
     if (currentQuestion?.image_url) {
       setCurrentImgSrc(currentQuestion.image_url);
@@ -355,9 +431,91 @@ function GamePlayContent() {
       setImgLoading(false);
       setImgHasFailed(false);
     }
-  }, [currentQuestion?.id, currentQuestion?.image_url, session?.current_question_index]);
+  }, [
+    currentQuestion?.id,
+    currentQuestion?.image_url,
+    session?.current_question_index,
+  ]);
 
-  // Envio de Resposta com Validação Segura
+  /**
+   * Gravação unificada e resiliente de resposta no Supabase:
+   * - Calcula pontuação e bônus de velocidade
+   * - Persiste o registro em `player_answers` (para o rendimento em tempo real do Host)
+   * - Atualiza `game_players` com o novo score acumulado
+   */
+  const processAnswerSubmission = async (isCorrect, selectedIndexForDb = 0) => {
+    const questionIndex = Number(session.current_question_index || 0);
+    const safeTimeLeft = Math.max(0, Number(timeLeft) || 0);
+    const basePoints = 500;
+    const speedBonus = safeTimeLeft * 25;
+    const totalGained = isCorrect ? basePoints + speedBonus : 0;
+
+    setScoreGained(totalGained);
+
+    if (isCorrect) {
+      const newStreak = streak + 1;
+      setStreak(newStreak);
+
+      let bonus = 0;
+      if (newStreak === 2) bonus = 100;
+      else if (newStreak === 3) bonus = 200;
+      else if (newStreak >= 4) bonus = 300;
+      setStreakBonus(bonus);
+
+      if (newStreak >= 2) {
+        sounds.playStreak();
+      } else {
+        sounds.playCorrect();
+      }
+
+      setPlayer((prev) => ({
+        ...prev,
+        score: (prev?.score || 0) + totalGained,
+      }));
+    } else {
+      setStreak(0);
+      setStreakBonus(0);
+      sounds.playWrong();
+    }
+
+    try {
+      // 1. Grava explicitamente em player_answers para o Host contabilizar Acertos/Erros ao vivo
+      const { error: ansError } = await supabase.from("player_answers").insert({
+        session_id: session.id,
+        player_id: player.id,
+        question_index: questionIndex,
+        selected_option: Number(selectedIndexForDb),
+        is_correct: Boolean(isCorrect),
+        time_left: safeTimeLeft,
+      });
+
+      if (ansError) {
+        console.warn(
+          "[MenteAfiada] Aviso ao gravar em player_answers:",
+          ansError.message
+        );
+      }
+
+      // 2. Atualiza pontuação do jogador na sala
+      if (totalGained > 0) {
+        const { error: scoreError } = await supabase
+          .from("game_players")
+          .update({ score: (player?.score || 0) + totalGained })
+          .eq("id", player.id);
+
+        if (scoreError) {
+          console.warn(
+            "[MenteAfiada] Aviso ao atualizar pontuação:",
+            scoreError.message
+          );
+        }
+      }
+    } catch (err) {
+      console.error("[MenteAfiada] Falha ao sincronizar resposta:", err);
+    }
+  };
+
+  // 1. Submissão para Múltipla Escolha (conversão numérica garantida)
   const handleSelectOption = async (optionIdx) => {
     if (hasAnswered || session?.time_state !== "RODANDO") return;
 
@@ -366,105 +524,100 @@ function GamePlayContent() {
     setSelectedOption(cleanOptionIdx);
     setHasAnswered(true);
 
-    const questionIndex = session.current_question_index || 0;
-    const currentQ = questions[questionIndex];
+    const expectedOption =
+      currentQuestion?.correct_option !== undefined &&
+      currentQuestion?.correct_option !== null
+        ? Number(currentQuestion.correct_option)
+        : -1;
 
-    try {
-      let isCorrect = false;
-      let totalGained = 0;
+    const isCorrect = expectedOption === cleanOptionIdx;
 
-      const { data: rpcData, error: rpcError } = await supabase.rpc("submit_player_answer", {
-        p_session_id: session.id,
-        p_player_id: player.id,
-        p_question_id: currentQ?.id || null,
-        p_selected_option: cleanOptionIdx,
-        p_time_left: Number(timeLeft) || 0,
-      });
-
-      if (!rpcError && rpcData?.success) {
-        isCorrect = Boolean(rpcData.is_correct);
-        totalGained = Number(rpcData.points_earned) || 0;
-      } else {
-        if (typeof currentQ?.correct_option === "number") {
-          isCorrect = currentQ.correct_option === cleanOptionIdx;
-        }
-
-        if (isCorrect) {
-          const basePoints = 500;
-          const speedBonus = Math.max(0, (timeLeft || 0) * 25);
-          totalGained = basePoints + speedBonus;
-
-          await supabase
-            .from("game_players")
-            .update({ score: (player?.score || 0) + totalGained })
-            .eq("id", player.id);
-        }
-
-        await supabase
-          .from("player_answers")
-          .insert({
-            session_id: session.id,
-            player_id: player.id,
-            question_index: questionIndex,
-            selected_option: cleanOptionIdx,
-            is_correct: isCorrect,
-            time_left: Number(timeLeft) || 0,
-          })
-          .catch(() => {});
-      }
-
-      setScoreGained(totalGained);
-
-      if (isCorrect) {
-        const newStreak = streak + 1;
-        setStreak(newStreak);
-
-        let bonus = 0;
-        if (newStreak === 2) bonus = 100;
-        else if (newStreak === 3) bonus = 200;
-        else if (newStreak >= 4) bonus = 300;
-        setStreakBonus(bonus);
-
-        if (newStreak >= 2) {
-          sounds.playStreak();
-        } else {
-          sounds.playCorrect();
-        }
-
-        setPlayer((prev) => ({
-          ...prev,
-          score: (prev?.score || 0) + totalGained,
-        }));
-      } else {
-        setStreak(0);
-        setStreakBonus(0);
-        sounds.playWrong();
-      }
-    } catch (err) {
-      console.error("[MenteAfiada] Erro ao registrar resposta do aluno:", err);
-    }
+    await processAnswerSubmission(isCorrect, cleanOptionIdx);
   };
 
-  const rankedPlayers = [...allPlayers].sort((a, b) => (b.score || 0) - (a.score || 0));
+  // 2. Submissão para Verdadeiro ou Falso Relâmpago
+  const handleSelectTrueFalse = async (choiceIdx) => {
+    if (hasAnswered || session?.time_state !== "RODANDO") return;
 
-  // Remoção (Kick)
+    sounds.playClick();
+    const cleanChoice = Number(choiceIdx);
+    setSelectedOption(cleanChoice);
+    setHasAnswered(true);
+
+    const expectedIdx = Number(
+      currentOptionsData?.correctIndex ??
+        currentQuestion?.correct_option ??
+        0
+    );
+    const isCorrect = expectedIdx === cleanChoice;
+
+    await processAnswerSubmission(isCorrect, cleanChoice);
+  };
+
+  // 3. Submissão para Completar Lacunas
+  const handleSubmitFillBlanks = async (selectedSequence) => {
+    if (hasAnswered || session?.time_state !== "RODANDO") return;
+
+    sounds.playClick();
+    setHasAnswered(true);
+
+    const expectedSequence = currentOptionsData?.correctSequence || [];
+    const isCorrect =
+      expectedSequence.length === selectedSequence.length &&
+      expectedSequence.every(
+        (word, idx) =>
+          word.trim().toLowerCase() ===
+          String(selectedSequence[idx] || "").trim().toLowerCase()
+      );
+
+    await processAnswerSubmission(isCorrect, isCorrect ? 0 : -1);
+  };
+
+  // 4. Submissão para Ordenação Sequencial
+  const handleSubmitSequenceOrder = async (submittedOrder) => {
+    if (hasAnswered || session?.time_state !== "RODANDO") return;
+
+    sounds.playClick();
+    setHasAnswered(true);
+
+    const expectedOrder = currentOptionsData?.correctOrder || [];
+    const isCorrect =
+      expectedOrder.length === submittedOrder.length &&
+      expectedOrder.every(
+        (step, idx) =>
+          step.trim().toLowerCase() ===
+          String(submittedOrder[idx] || "").trim().toLowerCase()
+      );
+
+    await processAnswerSubmission(isCorrect, isCorrect ? 0 : -1);
+  };
+
+  const rankedPlayers = [...allPlayers].sort(
+    (a, b) => (b.score || 0) - (a.score || 0)
+  );
+
   if (wasKicked) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 font-sans">
-        <div className="max-w-md w-full bg-[var(--card-bg)] border border-rose-500/40 rounded-3xl p-8 text-center space-y-6 shadow-2xl animate-in zoom-in-95 duration-200">
+      <div
+        className={`min-h-[calc(100vh-70px)] flex items-center justify-center p-6 font-sans transition-colors duration-300 ${styles.mainBg}`}
+      >
+        <div
+          className={`max-w-md w-full border border-rose-500/40 rounded-3xl p-8 text-center space-y-6 animate-in zoom-in-95 duration-200 ${styles.card}`}
+        >
           <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 text-rose-500 rounded-full flex items-center justify-center text-3xl mx-auto shadow-inner">
             🚫
           </div>
 
           <div className="space-y-2">
-            <h2 className="text-2xl font-black text-[var(--foreground)]">Acesso Removido</h2>
-            <p className="text-xs text-[var(--foreground)] opacity-70 leading-relaxed">
+            <h2 className="text-2xl font-black">Acesso Removido</h2>
+            <p className="text-xs opacity-70 leading-relaxed">
               Você foi removido desta sala pelo anfitrião da partida.
             </p>
           </div>
 
           <div className="space-y-3 pt-2">
             <button
+              type="button"
               onClick={() => {
                 setWasKicked(false);
                 router.push("/arena");
@@ -475,6 +628,7 @@ function GamePlayContent() {
             </button>
 
             <button
+              type="button"
               onClick={() => {
                 setWasKicked(false);
                 router.push("/");
@@ -489,43 +643,36 @@ function GamePlayContent() {
     );
   }
 
-  // Partida Ativa / Pódio
   if (player && session) {
     return (
-      <div className="min-h-screen bg-[var(--background)] font-sans text-[var(--foreground)] flex flex-col transition-colors duration-300">
-        <div className="bg-slate-900 border-b border-slate-800 transition-none">
-          <header className="py-4 px-6">
-            <div className="max-w-7xl mx-auto flex items-center justify-between">
-              <Link href="/" className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-700 bg-white">
-                  <img src="/logo-dark.jpeg" alt="Logo MenteAfiada" className="w-full h-full object-cover" />
-                </div>
-                <span className="text-xl font-bold tracking-tight text-white">
-                  Mente<span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400">Afiada</span>
-                </span>
-              </Link>
+      <div
+        className={`min-h-[calc(100vh-70px)] font-sans flex flex-col transition-colors duration-300 ${styles.mainBg}`}
+      >
+        <div className="max-w-lg w-full mx-auto px-6 pt-5 flex items-center justify-between">
+          <span className="text-xs font-mono font-bold opacity-60">
+            SALA PIN: <strong className="text-amber-500">{session.pin}</strong>
+          </span>
 
-              <nav className="flex items-center gap-3">
-                <button
-                  onClick={toggleSound}
-                  className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border border-slate-700 transition cursor-pointer"
-                  title="Ativar/Desativar Som"
-                >
-                  {soundEnabled ? "🔊" : "🔇"}
-                </button>
-                <LanguageSelector />
-                {user && <UserMenu userName={user.firstName || "Aluno"} userRole={userRole} />}
-              </nav>
-            </div>
-          </header>
+          <button
+            type="button"
+            onClick={toggleSound}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-1.5 ${styles.soundBtn}`}
+            title="Ativar/Desativar Som"
+          >
+            <span>{soundEnabled ? "🔊" : "🔇"}</span>
+            <span>{soundEnabled ? "Som Ativado" : "Som Mudo"}</span>
+          </button>
         </div>
 
         <div className="flex-grow flex flex-col items-center justify-center p-6">
-          <div className="max-w-md w-full bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl p-6 shadow-2xl space-y-6 transition-colors duration-300">
-            {/* Placar Superior do Aluno */}
-            <div className="flex justify-between items-center border-b border-[var(--card-border)] pb-4">
+          <div
+            className={`max-w-lg w-full border rounded-3xl p-6 space-y-6 transition-colors duration-300 ${styles.card}`}
+          >
+            <div className="flex justify-between items-center border-b border-inherit pb-4">
               <div>
-                <span className="text-xs text-[var(--foreground)] opacity-70">{t("player") || "Jogador"}</span>
+                <span className="text-xs opacity-70">
+                  {t("player") || "Jogador"}
+                </span>
                 <p className="font-bold text-emerald-500 flex items-center gap-1.5">
                   {player.player_name}
                   {streak >= 2 && (
@@ -536,49 +683,63 @@ function GamePlayContent() {
                 </p>
               </div>
               <div className="text-right">
-                <span className="text-xs text-[var(--foreground)] opacity-70">{t("points") || "Pontos"}</span>
-                <p className="font-mono font-bold text-amber-500">{player.score || 0} pts</p>
+                <span className="text-xs opacity-70">
+                  {t("points") || "Pontos"}
+                </span>
+                <p className="font-mono font-bold text-amber-500">
+                  {player.score || 0} pts
+                </p>
               </div>
             </div>
 
-            {/* Sala de Espera */}
             {session.status === "AGUARDANDO" && (
               <div className="text-center py-8 space-y-4">
-                <div className="inline-block w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-                <h3 className="text-xl font-bold text-[var(--foreground)]">
+                <div className="inline-block w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                <h3 className="text-xl font-bold">
                   {t("waiting_room_title") || "Você está na sala de espera!"}
                 </h3>
-                <p className="text-xs text-[var(--foreground)] opacity-70">
-                  {t("waiting_room_desc") || "Aguarde o professor clicar em 'Iniciar Partida'..."}
+                <p className="text-xs opacity-70">
+                  {t("waiting_room_desc") ||
+                    "Aguarde o professor clicar em 'Iniciar Partida'..."}
                 </p>
               </div>
             )}
 
-            {/* Questão Ativa com Fallback Inteligente de Imagem */}
             {session.status === "EM_ANDAMENTO" && currentQuestion && (
               <div className="space-y-5">
                 <div className="flex justify-between items-center text-xs font-semibold">
-                  <span className="text-[var(--foreground)] opacity-70">
-                    {t("question") || "Questão"} {(session.current_question_index || 0) + 1} {t("of") || "de"} {questions.length}
+                  <span className="opacity-70">
+                    {t("question") || "Questão"}{" "}
+                    {(session.current_question_index || 0) + 1}{" "}
+                    {t("of") || "de"} {questions.length}
                   </span>
                   <div
-                    className={`flex items-center gap-1.5 bg-[var(--background)] border border-[var(--card-border)] px-3 py-1 rounded-full shadow-sm transition-all ${
-                      timeLeft <= 5 ? "border-rose-500 scale-105 animate-pulse" : ""
+                    className={`flex items-center gap-1.5 border px-3 py-1 rounded-full shadow-sm transition-all ${
+                      styles.subBox
+                    } ${
+                      timeLeft <= 5
+                        ? "border-rose-500 scale-105 animate-pulse"
+                        : ""
                     }`}
                   >
                     <span>⏱️</span>
-                    <span className={`font-mono font-extrabold text-sm ${timeLeft <= 5 ? "text-rose-500" : "text-amber-500"}`}>
+                    <span
+                      className={`font-mono font-extrabold text-sm ${
+                        timeLeft <= 5 ? "text-rose-500" : "text-amber-500"
+                      }`}
+                    >
                       {timeLeft}s
                     </span>
                   </div>
                 </div>
 
-                {/* Exibição Ilustrativa com Proxy Anti-Bloqueio CORS */}
                 {currentImgSrc && !imgHasFailed && (
-                  <div className="relative w-full flex flex-col items-center justify-center bg-slate-900/80 p-2.5 rounded-2xl border border-[var(--card-border)] min-h-[140px] overflow-hidden group">
+                  <div
+                    className={`relative w-full flex flex-col items-center justify-center p-2.5 rounded-2xl border min-h-[140px] overflow-hidden group ${styles.imageWrapper}`}
+                  >
                     {imgLoading && (
                       <div className="absolute inset-0 flex items-center justify-center bg-slate-900/60 z-10">
-                        <div className="w-7 h-7 border-3 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+                        <div className="w-7 h-7 border-3 border-purple-500 border-t-transparent rounded-full animate-spin" />
                       </div>
                     )}
 
@@ -590,75 +751,152 @@ function GamePlayContent() {
                       onLoad={() => setImgLoading(false)}
                       onError={() => {
                         if (!currentImgSrc.includes("wsrv.nl")) {
-                          setCurrentImgSrc(`https://wsrv.nl/?url=${encodeURIComponent(currentQuestion.image_url)}&w=800&output=webp`);
+                          setCurrentImgSrc(
+                            `https://wsrv.nl/?url=${encodeURIComponent(
+                              currentQuestion.image_url
+                            )}&w=800&output=webp`
+                          );
                         } else {
                           setImgLoading(false);
                           setImgHasFailed(true);
                         }
                       }}
                       className={`max-h-52 w-auto max-w-full object-contain rounded-xl shadow-md transition-all duration-300 cursor-zoom-in ${
-                        imgLoading ? "opacity-0 scale-95" : "opacity-100 scale-100"
+                        imgLoading
+                          ? "opacity-0 scale-95"
+                          : "opacity-100 scale-100"
                       }`}
                       onClick={() => setZoomedImage(currentImgSrc)}
                     />
-
-                    {!imgLoading && (
-                      <span className="text-[10px] text-slate-400 mt-1 opacity-70 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-                        🔍 Toque na imagem para ampliar
-                      </span>
-                    )}
                   </div>
                 )}
-
-                <h2 className="text-lg font-bold text-[var(--foreground)] text-center min-h-[44px] flex items-center justify-center leading-snug">
-                  {currentQuestion.question_text}
-                </h2>
 
                 {session.time_state === "PAUSADO" && !hasAnswered && (
-                  <div className="p-4 bg-[var(--background)] border border-[var(--card-border)] text-center rounded-2xl shadow-sm">
+                  <div
+                    className={`p-4 border text-center rounded-2xl shadow-sm ${styles.subBox}`}
+                  >
                     <p className="text-sm font-semibold text-amber-500">
-                      {t("teacher_paused") || "⏳ O professor ainda não liberou o tempo."}
+                      {t("teacher_paused") ||
+                        "⏳ O professor ainda não liberou o tempo."}
                     </p>
-                    <p className="text-xs text-[var(--foreground)] opacity-70 mt-1">
-                      {t("prepare_options") || "Prepare-se! As opções serão ativadas assim que der Play."}
+                    <p className="text-xs opacity-70 mt-1">
+                      {t("prepare_options") ||
+                        "Prepare-se! As opções serão ativadas assim que der Play."}
                     </p>
                   </div>
                 )}
 
-                {/* Alternativas */}
-                <div className="grid grid-cols-1 gap-3">
-                  {currentQuestion.options.map((opt, i) => {
-                    const colors = [
-                      "bg-rose-600 hover:bg-rose-700",
-                      "bg-blue-600 hover:bg-blue-700",
-                      "bg-amber-600 hover:bg-amber-700",
-                      "bg-emerald-600 hover:bg-emerald-700",
-                    ];
-                    const isSelected = selectedOption === i;
+                {/* RENDERIZAÇÃO POR FORMATO DE QUESTÃO */}
+                {currentQuestionType === "fill_blanks" && (
+                  <FillBlanksPlayer
+                    questionText={currentQuestion.question_text}
+                    bankWords={currentOptionsData?.bank || []}
+                    disabled={hasAnswered || session.time_state !== "RODANDO"}
+                    onSubmitSequence={handleSubmitFillBlanks}
+                  />
+                )}
 
-                    return (
+                {currentQuestionType === "sequence_order" && (
+                  <SequenceOrderingPlayer
+                    questionText={currentQuestion.question_text}
+                    items={currentOptionsData?.correctOrder || []}
+                    disabled={hasAnswered || session.time_state !== "RODANDO"}
+                    onSubmitOrder={handleSubmitSequenceOrder}
+                  />
+                )}
+
+                {currentQuestionType === "true_false" && (
+                  <>
+                    <h2 className="text-lg font-bold text-center min-h-[44px] flex items-center justify-center leading-snug">
+                      {currentQuestion.question_text}
+                    </h2>
+                    <div className="grid grid-cols-2 gap-4 pt-2">
                       <button
-                        key={i}
-                        disabled={hasAnswered || session.time_state !== "RODANDO"}
-                        onClick={() => handleSelectOption(i)}
-                        className={`w-full p-4 font-bold rounded-2xl text-left text-sm transition-all flex items-center justify-between cursor-pointer text-white shadow-md ${
-                          colors[i % 4]
+                        type="button"
+                        disabled={
+                          hasAnswered || session.time_state !== "RODANDO"
+                        }
+                        onClick={() => handleSelectTrueFalse(0)}
+                        className={`p-6 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-base shadow-lg transition-all flex flex-col items-center gap-2 cursor-pointer ${
+                          hasAnswered || session.time_state !== "RODANDO"
+                            ? "opacity-60 cursor-not-allowed"
+                            : "active:scale-95"
                         } ${
-                          hasAnswered || session.time_state !== "RODANDO" ? "opacity-60 cursor-not-allowed" : "active:scale-95"
-                        } ${isSelected ? "ring-4 ring-white scale-[1.02]" : ""}`}
+                          selectedOption === 0 ? "ring-4 ring-white scale-105" : ""
+                        }`}
                       >
-                        <span>
-                          {String.fromCharCode(65 + i)}. {opt}
-                        </span>
-                        {isSelected && <span>✔️</span>}
+                        <span className="text-3xl">✅</span>
+                        <span>VERDADEIRO</span>
                       </button>
-                    );
-                  })}
-                </div>
 
-                {/* Feedback Imediato */}
+                      <button
+                        type="button"
+                        disabled={
+                          hasAnswered || session.time_state !== "RODANDO"
+                        }
+                        onClick={() => handleSelectTrueFalse(1)}
+                        className={`p-6 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-base shadow-lg transition-all flex flex-col items-center gap-2 cursor-pointer ${
+                          hasAnswered || session.time_state !== "RODANDO"
+                            ? "opacity-60 cursor-not-allowed"
+                            : "active:scale-95"
+                        } ${
+                          selectedOption === 1 ? "ring-4 ring-white scale-105" : ""
+                        }`}
+                      >
+                        <span className="text-3xl">❌</span>
+                        <span>FALSO</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {currentQuestionType === "multiple_choice" && (
+                  <>
+                    <h2 className="text-lg font-bold text-center min-h-[44px] flex items-center justify-center leading-snug">
+                      {currentQuestion.question_text}
+                    </h2>
+
+                    <div className="grid grid-cols-1 gap-3">
+                      {currentOptionsData.map((opt, i) => {
+                        const colors = [
+                          "bg-rose-600 hover:bg-rose-700",
+                          "bg-blue-600 hover:bg-blue-700",
+                          "bg-amber-600 hover:bg-amber-700",
+                          "bg-emerald-600 hover:bg-emerald-700",
+                        ];
+                        const isSelected = selectedOption === i;
+
+                        return (
+                          <button
+                            key={i}
+                            type="button"
+                            disabled={
+                              hasAnswered || session.time_state !== "RODANDO"
+                            }
+                            onClick={() => handleSelectOption(i)}
+                            className={`w-full p-4 font-bold rounded-2xl text-left text-sm transition-all flex items-center justify-between cursor-pointer text-white shadow-md ${
+                              colors[i % 4]
+                            } ${
+                              hasAnswered || session.time_state !== "RODANDO"
+                                ? "opacity-60 cursor-not-allowed"
+                                : "active:scale-95"
+                            } ${isSelected ? "ring-4 ring-white scale-[1.02]" : ""}`}
+                          >
+                            <span>
+                              {String.fromCharCode(65 + i)}. {opt}
+                            </span>
+                            {isSelected && <span>✔️</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
                 {hasAnswered && (
-                  <div className="p-4 bg-[var(--background)] rounded-2xl border border-[var(--card-border)] text-center space-y-1 animate-in zoom-in-95 duration-200 shadow-sm">
+                  <div
+                    className={`p-4 rounded-2xl border text-center space-y-1 animate-in zoom-in-95 duration-200 shadow-sm ${styles.subBox}`}
+                  >
                     <p className="text-emerald-500 font-bold text-sm">
                       {t("answer_registered") || "Resposta Registada!"}
                     </p>
@@ -669,7 +907,8 @@ function GamePlayContent() {
                         </p>
                         {streakBonus > 0 && (
                           <p className="text-[11px] text-amber-500 font-bold mt-1 animate-bounce">
-                            🔥 {t("streak_bonus") || "Bónus de Streak"} (+{streakBonus} pts)!
+                            🔥 {t("streak_bonus") || "Bónus de Streak"} (+
+                            {streakBonus} pts)!
                           </p>
                         )}
                       </div>
@@ -683,37 +922,53 @@ function GamePlayContent() {
               </div>
             )}
 
-            {/* PÓDIO FINAL NO PAINEL DO ALUNO */}
             {session.status === "FINALIZADO" && (
               <div className="text-center py-6 space-y-6">
                 <h3 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-yellow-500">
                   {t("game_over") || "🏆 Fim de Jogo!"}
                 </h3>
-                
-                <div className="p-4 bg-[var(--background)] rounded-2xl border border-[var(--card-border)] shadow-sm">
-                  <p className="text-xs text-[var(--foreground)] opacity-70 font-bold">
+
+                <div
+                  className={`p-4 rounded-2xl border shadow-sm ${styles.subBox}`}
+                >
+                  <p className="text-xs opacity-70 font-bold">
                     {t("final_score") || "Sua Pontuação Final:"}
                   </p>
-                  <p className="text-3xl font-black text-emerald-500 mt-1">{player.score || 0} pts</p>
+                  <p className="text-3xl font-black text-emerald-500 mt-1">
+                    {player.score || 0} pts
+                  </p>
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-xs text-[var(--foreground)] opacity-70 font-bold uppercase tracking-widest text-left mb-3">
+                  <p className="text-xs opacity-70 font-bold uppercase tracking-widest text-left mb-3">
                     {t("top_3") || "Top 3 Classificados"}
                   </p>
                   {rankedPlayers.slice(0, 3).map((p, idx) => (
                     <div
                       key={p.id}
-                      className={`p-3 bg-[var(--background)] border border-[var(--card-border)] rounded-xl flex justify-between items-center text-xs font-semibold shadow-sm transition-all duration-500 ${
-                        idx === 2 && !showPodium3 ? "opacity-0 translate-y-2" : ""
-                      } ${idx === 1 && !showPodium2 ? "opacity-0 translate-y-2" : ""} ${
-                        idx === 0 && !showPodium1 ? "opacity-0 scale-95" : "scale-100 opacity-100"
+                      className={`p-3 border rounded-xl flex justify-between items-center text-xs font-semibold shadow-sm transition-all duration-500 ${
+                        styles.subBox
+                      } ${
+                        idx === 2 && !showPodium3
+                          ? "opacity-0 translate-y-2"
+                          : ""
+                      } ${
+                        idx === 1 && !showPodium2
+                          ? "opacity-0 translate-y-2"
+                          : ""
+                      } ${
+                        idx === 0 && !showPodium1
+                          ? "opacity-0 scale-95"
+                          : "scale-100 opacity-100"
                       }`}
                     >
-                      <span className="text-[var(--foreground)] font-bold">
-                        {idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉"} {p.player_name}
+                      <span className="font-bold">
+                        {idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉"}{" "}
+                        {p.player_name}
                       </span>
-                      <span className="font-mono text-emerald-500 font-bold">{p.score || 0} pts</span>
+                      <span className="font-mono text-emerald-500 font-bold">
+                        {p.score || 0} pts
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -722,7 +977,6 @@ function GamePlayContent() {
           </div>
         </div>
 
-        {/* Modal de Zoom da Imagem */}
         {zoomedImage && (
           <div
             onClick={() => setZoomedImage(null)}
@@ -737,6 +991,7 @@ function GamePlayContent() {
                 className="max-h-[85vh] max-w-full rounded-2xl object-contain shadow-2xl border border-slate-700"
               />
               <button
+                type="button"
                 onClick={() => setZoomedImage(null)}
                 className="absolute -top-3 -right-3 bg-slate-800 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold border border-slate-600 hover:bg-slate-700 cursor-pointer"
               >
@@ -746,7 +1001,17 @@ function GamePlayContent() {
           </div>
         )}
 
-        {/* Chat da Sala */}
+        {/* INTERAÇÕES AO VIVO DISPARADAS PELO INSTRUTOR */}
+        <LiveWordCloud
+          sessionId={session.id}
+          isHost={false}
+          playerName={player.player_name}
+        />
+        <QuickPulseOverlay
+          sessionId={session.id}
+          isHost={false}
+          playerId={player.id}
+        />
         <ArenaChat
           sessionId={session.id}
           playerName={player.player_name}
@@ -756,46 +1021,23 @@ function GamePlayContent() {
     );
   }
 
-  // Formulário Inicial de Acesso por PIN
   return (
-    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] font-sans flex flex-col justify-between transition-colors duration-300">
-      <div className="bg-slate-900 border-b border-slate-800 transition-none">
-        <header className="py-4 px-6">
-          <div className="max-w-7xl mx-auto flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-700 bg-white">
-                <img src="/logo-dark.jpeg" alt="Logo MenteAfiada" className="w-full h-full object-cover" />
-              </div>
-              <span className="text-xl font-bold text-white tracking-tight">
-                Mente<span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400">Afiada</span>
-              </span>
-            </Link>
-
-            <nav className="flex items-center gap-3">
-              <button
-                onClick={toggleSound}
-                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border border-slate-700 transition cursor-pointer"
-                title="Ativar/Desativar Som"
-              >
-                {soundEnabled ? "🔊" : "🔇"}
-              </button>
-              <LanguageSelector />
-              {user && <UserMenu userName={user.firstName || "Aluno"} userRole={userRole} />}
-            </nav>
-          </div>
-        </header>
-      </div>
-
+    <div
+      className={`min-h-[calc(100vh-70px)] font-sans flex flex-col justify-between transition-colors duration-300 ${styles.mainBg}`}
+    >
       <main className="max-w-md w-full mx-auto px-6 py-12 flex-grow flex items-center justify-center">
-        <div className="bg-[var(--card-bg)] w-full rounded-3xl p-8 shadow-2xl border border-[var(--card-border)] text-center transition-colors duration-300 space-y-6">
+        <div
+          className={`w-full rounded-3xl p-8 border text-center transition-colors duration-300 space-y-6 ${styles.card}`}
+        >
           <div>
-            <h2 className="text-2xl font-bold text-[var(--foreground)] mb-2">
+            <h2 className="text-2xl font-bold mb-2">
               {t("enter_quiz") || "Entrar no Quiz"}
             </h2>
-            <p className="text-xs text-[var(--foreground)] opacity-70 font-semibold">
+            <p className="text-xs opacity-70 font-semibold">
               {urlPin
                 ? `${t("connecting_pin") || "Conectando à Sala PIN"} ${urlPin}`
-                : t("insert_pin") || "Insira o código PIN fornecido pelo professor"}
+                : t("insert_pin") ||
+                  "Insira o código PIN fornecido pelo professor"}
             </p>
           </div>
 
@@ -813,7 +1055,7 @@ function GamePlayContent() {
                   placeholder={t("pin_placeholder") || "Código PIN da Sala"}
                   value={pin}
                   onChange={(e) => setPin(e.target.value)}
-                  className="w-full bg-[var(--background)] border border-[var(--card-border)] text-amber-500 font-mono font-bold text-center text-xl rounded-xl p-3.5 focus:outline-none focus:ring-2 focus:ring-purple-500 tracking-widest shadow-sm"
+                  className={`w-full border font-mono font-bold text-center text-xl rounded-xl p-3.5 focus:outline-none focus:ring-2 tracking-widest shadow-sm ${styles.pinInput}`}
                 />
               </div>
             )}
@@ -825,7 +1067,7 @@ function GamePlayContent() {
                 value={playerName}
                 onChange={(e) => setPlayerName(e.target.value)}
                 autoFocus
-                className="w-full bg-[var(--background)] border border-[var(--card-border)] text-[var(--foreground)] font-bold text-center text-md rounded-xl p-3.5 focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm"
+                className={`w-full border font-bold text-center text-md rounded-xl p-3.5 focus:outline-none focus:ring-2 shadow-sm ${styles.input}`}
               />
             </div>
 
@@ -834,19 +1076,22 @@ function GamePlayContent() {
               disabled={loading}
               className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/20 transition duration-200 disabled:opacity-50 cursor-pointer"
             >
-              {loading ? t("connecting") || "A conectar..." : t("enter_room") || "Entrar na Sala 🚀"}
+              {loading
+                ? t("connecting") || "A conectar..."
+                : t("enter_room") || "Entrar na Sala 🚀"}
             </button>
 
-            <p className="text-[10px] text-[var(--foreground)] opacity-50 text-center leading-normal pt-2">
-              🔒 Ao entrar, você concorda com o uso do apelido apenas para a dinâmica da partida.
-              Nenhum dado pessoal sensível é exposto publicamente.
+            <p className="text-[10px] opacity-55 text-center leading-normal pt-2">
+              🔒 Ao entrar, você concorda com o uso do apelido apenas para a
+              dinâmica da partida. Nenhum dado pessoal sensível é exposto
+              publicamente.
             </p>
           </form>
 
-          <div className="pt-4 border-t border-[var(--card-border)]">
+          <div className="pt-4 border-t border-inherit">
             <Link
               href="/arena"
-              className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-xl text-xs font-bold transition"
+              className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-purple-500/10 hover:bg-purple-500/20 text-purple-500 border border-purple-500/30 rounded-xl text-xs font-bold transition"
             >
               <span>⚔️</span> Explorar Salas Abertas na Arena
             </Link>
@@ -854,7 +1099,9 @@ function GamePlayContent() {
         </div>
       </main>
 
-      <footer className="py-6 text-center text-xs text-[var(--foreground)] opacity-50 font-semibold bg-[var(--background)] border-t border-[var(--card-border)]">
+      <footer
+        className={`py-6 text-center text-xs font-semibold border-t transition-colors duration-300 ${styles.footer}`}
+      >
         © {new Date().getFullYear()} MenteAfiada Realtime Quiz Engine.
       </footer>
     </div>
@@ -865,7 +1112,7 @@ export default function GamePlayPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center text-white bg-slate-900">
+        <div className="min-h-[calc(100vh-70px)] flex items-center justify-center text-white bg-slate-950">
           Carregando jogo...
         </div>
       }

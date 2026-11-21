@@ -1,21 +1,22 @@
 /**
  * ============================================================================
- * Ferramenta Educacional - Automação de Sincronização Periódica
- * ============================================================================
+ * Plataforma Educacional MenteAfiada
+ * Arquivo: scripts/auto-push.js
  * Objetivo: Executar o comando 'npm run push-drive' logo no arranque e,
- * seguidamente, a cada 5 minutos enquanto o projeto estiver ativo.
- *
- * Melhorias de UX/Monitorização:
- * - Execução imediata no arranque: Garante confirmação visual no terminal sem
- *   necessidade de esperar 5 minutos para saber se a tarefa iniciou.
- * - Tratamento de concorrência com bloqueio atómico.
- * - Saída estruturada e com carimbos de data/hora para auditoria simples.
+ * seguidamente, a cada 10 minutos em segundo plano enquanto o VS Code
+ * estiver aberto.
+ * 
+ * Recursos:
+ * - Execução imediata na inicialização para garantir sincronia instantânea;
+ * - Bloqueio atômico de concorrência (evita duas execuções simultâneas);
+ * - Logs estruturados com horário local (America/Sao_Paulo).
+ * ============================================================================
  */
 
 const { exec } = require("child_process");
 
-// Definições de intervalo (5 minutos convertidos para milissegundos)
-const INTERVALO_MINUTOS = 5;
+// Intervalo configurado para 10 minutos (em milissegundos)
+const INTERVALO_MINUTOS = 10;
 const INTERVALO_MS = INTERVALO_MINUTOS * 60 * 1000;
 const COMANDO_PUSH = "npm run push-drive";
 
@@ -26,8 +27,10 @@ let emExecucao = false;
  * @returns {string}
  */
 function obterTimestamp() {
-  const agora = new Date();
-  return agora.toLocaleTimeString("pt-BR", { hour12: false });
+  return new Date().toLocaleTimeString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour12: false,
+  });
 }
 
 /**
@@ -35,43 +38,51 @@ function obterTimestamp() {
  */
 function executarSincronizacao() {
   if (emExecucao) {
-    console.log(`[${obterTimestamp()}] ⚠️ Um processo de sincronização ainda se encontra ativo. O novo ciclo aguardará.`);
+    console.log(
+      `[${obterTimestamp()}] ⚠️ Sincronização anterior ainda em andamento. Aguardando próximo ciclo.`
+    );
     return;
   }
 
   emExecucao = true;
-  console.log(`\n[${obterTimestamp()}] 🚀 A executar '${COMANDO_PUSH}'...`);
+  console.log(`\n[${obterTimestamp()}] 🚀 Executando '${COMANDO_PUSH}'...`);
 
   exec(COMANDO_PUSH, (erro, stdout, stderr) => {
     emExecucao = false;
 
     if (erro) {
-      console.error(`[${obterTimestamp()}] ❌ Erro ao executar '${COMANDO_PUSH}':`);
+      console.error(
+        `[${obterTimestamp()}] ❌ Erro ao executar '${COMANDO_PUSH}':`
+      );
       console.error(erro.message);
       return;
     }
 
     if (stderr && stderr.trim().length > 0) {
-      console.warn(`[${obterTimestamp()}] ⚠️ Avisos gerados na execução:\n${stderr}`);
+      console.warn(
+        `[${obterTimestamp()}] ⚠️ Avisos na execução:\n${stderr.trim()}`
+      );
     }
 
     if (stdout && stdout.trim().length > 0) {
       console.log(`[${obterTimestamp()}] 📋 Resultado:\n${stdout.trim()}`);
     }
 
-    console.log(`[${obterTimestamp()}] ✅ Sincronização concluída com sucesso. Próxima execução programada para daqui a ${INTERVALO_MINUTOS} minutos.`);
+    console.log(
+      `[${obterTimestamp()}] ✅ Sincronização concluída. Próxima execução em ${INTERVALO_MINUTOS} minutos.`
+    );
   });
 }
 
 // Cabeçalho de confirmação inicial
 console.log("=======================================================");
-console.log(" Sincronizador Periódico para Ambiente de Ensino");
-console.log(" Estado: ATIVO");
-console.log(` Ciclo de agendamento: A cada ${INTERVALO_MINUTOS} minutos`);
+console.log(" MenteAfiada — Sincronizador Automático (Google Drive)");
+console.log(" Estado: ATIVO EM SEGUNDO PLANO");
+console.log(` Intervalo: A cada ${INTERVALO_MINUTOS} minutos`);
 console.log("=======================================================");
 
-// Execução inicial de confirmação
+// Execução imediata ao iniciar
 executarSincronizacao();
 
-// Agendamento das execuções periódicas subsequentes
+// Agendamento periódico a cada 10 minutos
 setInterval(executarSincronizacao, INTERVALO_MS);
