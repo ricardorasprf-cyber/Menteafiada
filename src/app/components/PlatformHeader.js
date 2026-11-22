@@ -5,7 +5,8 @@
  * Objetivo: Cabeçalho global unificado reproduzindo fielmente a logo, a
  * comutação de tema em 1 clique ("theme-classic", "theme-dark", "theme-synthwave"),
  * o seletor de idioma sincronizado e o menu autenticado ("Olá, [Nome]") com
- * atalhos completos por perfil (Proprietário, Criador, Gestor e Participante).
+ * atalhos completos por perfil (Proprietário, Criador, Gestor e Participante),
+ * garantindo exibição resiliente dos botões de autenticação (/sign-in e /sign-up).
  * ============================================================================
  */
 
@@ -17,8 +18,6 @@ import {
   useAuth,
   useUser,
   useClerk,
-  SignInButton,
-  SignUpButton,
 } from '@clerk/nextjs';
 import { useTheme } from '@/app/components/ThemeProvider';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -180,11 +179,14 @@ export default function PlatformHeader() {
 
   const isHomePage = pathname === '/';
 
+  // Considera autenticado somente quando o Clerk já carregou e confirmou isSignedIn
+  const showAuthenticatedMenu = Boolean(isLoaded && isSignedIn);
+
   return (
     <header
       className={`border-b backdrop-blur-md sticky top-0 z-50 px-4 sm:px-6 py-3.5 flex items-center justify-between transition-colors duration-300 print:hidden ${t.header}`}
     >
-      {/* Logotipo Oficial MenteAfiada (Idêntico à Tela Inicial) */}
+      {/* Logotipo Oficial MenteAfiada */}
       <div
         className="flex items-center gap-2.5 cursor-pointer group"
         onClick={() => router.push('/')}
@@ -199,7 +201,7 @@ export default function PlatformHeader() {
         </span>
       </div>
 
-      {/* Links Centrais de Navegação (Adaptados automaticamente à página atual) */}
+      {/* Links Centrais de Navegação */}
       <nav className="hidden lg:flex items-center gap-8 text-sm font-semibold">
         {isHomePage ? (
           <>
@@ -255,7 +257,7 @@ export default function PlatformHeader() {
         )}
       </nav>
 
-      {/* Controles à Direita: Botão 1-Clique de Tema + Idioma + Menu Usuário */}
+      {/* Controles à Direita: Botão 1-Clique de Tema + Idioma + Autenticação / Menu Usuário */}
       <div className="flex items-center gap-2 sm:gap-3 min-h-[42px]">
         {/* Botão Direto de 1 Clique: Claro -> Escuro -> NEON */}
         <button
@@ -264,8 +266,10 @@ export default function PlatformHeader() {
           title="Clique para alternar entre Modo Claro, Modo Escuro e Modo NEON"
           className={`flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-xl border text-xs font-bold transition-all active:scale-95 cursor-pointer ${t.themeBtn}`}
         >
-          <span className="text-sm leading-none">{themeInfo.icon}</span>
-          <span className="hidden xs:inline sm:inline">{themeInfo.label}</span>
+          <span className="text-sm leading-none">{themeInfo?.icon || '☀️'}</span>
+          <span className="hidden xs:inline sm:inline">
+            {themeInfo?.label || 'Tema'}
+          </span>
         </button>
 
         {/* Seletor de Idioma (BR PT-BR) */}
@@ -326,39 +330,29 @@ export default function PlatformHeader() {
           )}
         </div>
 
-        {/* Estado: Usuário NÃO Logado */}
-        {isLoaded && !isSignedIn && (
+        {/* Estado: Usuário NÃO Logado (Visível imediatamente e direcionando para /sign-in e /sign-up) */}
+        {!showAuthenticatedMenu && (
           <>
-            <SignInButton
-              mode="modal"
-              forceRedirectUrl={pathname || '/'}
-              fallbackRedirectUrl={pathname || '/'}
+            <button
+              type="button"
+              onClick={() => router.push('/sign-in')}
+              className={`text-sm font-semibold transition-colors px-3 sm:px-4 py-2 rounded-full cursor-pointer ${t.navLink}`}
             >
-              <button
-                type="button"
-                className={`text-sm font-semibold transition-colors px-3 sm:px-4 py-2 rounded-full cursor-pointer ${t.navLink}`}
-              >
-                Entrar
-              </button>
-            </SignInButton>
+              Entrar
+            </button>
 
-            <SignUpButton
-              mode="modal"
-              forceRedirectUrl={pathname || '/'}
-              fallbackRedirectUrl={pathname || '/'}
+            <button
+              type="button"
+              onClick={() => router.push('/sign-up')}
+              className={`text-xs sm:text-sm font-semibold px-4 sm:px-5 py-2 rounded-full active:scale-95 transition-all cursor-pointer ${t.primaryBtn}`}
             >
-              <button
-                type="button"
-                className={`text-xs sm:text-sm font-semibold px-4 sm:px-5 py-2 rounded-full active:scale-95 transition-all cursor-pointer ${t.primaryBtn}`}
-              >
-                Criar Conta Grátis
-              </button>
-            </SignUpButton>
+              Criar Conta Grátis
+            </button>
           </>
         )}
 
         {/* Estado: Usuário LOGADO (Menu Dropdown Unificado) */}
-        {isLoaded && isSignedIn && (
+        {showAuthenticatedMenu && (
           <div className="relative" ref={userMenuRef}>
             <button
               type="button"
