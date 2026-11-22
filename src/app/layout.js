@@ -4,7 +4,8 @@
  * Arquivo: src/app/layout.js
  * Objetivo: Layout raiz da aplicação que injeta globalmente o ClerkProvider,
  * LanguageProvider, ThemeProvider, PlatformHeader (cabeçalho unificado em
- * todas as páginas) e AfiadinhoAvatar.
+ * todas as páginas), VisitTracker (registro silencioso de visitações totais
+ * e por usuário autenticado) e AfiadinhoAvatar.
  * ============================================================================
  */
 
@@ -15,6 +16,7 @@ import ThemeProvider from "@/app/components/ThemeProvider";
 import PlatformHeader from "@/app/components/PlatformHeader";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import AfiadinhoAvatar from "@/app/components/AfiadinhoAvatar";
+import VisitTracker from "@/app/components/VisitTracker";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -45,6 +47,7 @@ export default function RootLayout({ children }) {
         >
           <LanguageProvider>
             <ThemeProvider>
+              {typeof VisitTracker === "function" && <VisitTracker />}
               <PlatformHeader />
               {children}
               <AfiadinhoAvatar />

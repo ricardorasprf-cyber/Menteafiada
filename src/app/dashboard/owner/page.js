@@ -7,7 +7,8 @@
  * unificado (PlatformHeader):
  * - Gestão de perfis com ordenação hierárquica e sincronização Clerk/Supabase;
  * - Cálculo de faixa etária em conformidade com a LGPD;
- * - Alternador entre Gestão de Perfis e Salas & Legado (AdminRoomsManager);
+ * - Alternador entre Gestão de Perfis, Salas & Legado (AdminRoomsManager) e
+ *   Controle de Visitações (VisitsAnalyticsPanel - totais e por login);
  * - Suporte dinâmico aos modos Claro, Escuro e NEON.
  * ============================================================================
  */
@@ -20,9 +21,9 @@ import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import { useTheme } from "@/app/components/ThemeProvider";
 import AdminRoomsManager from "@/app/components/AdminRoomsManager";
+import VisitsAnalyticsPanel from "@/app/components/VisitsAnalyticsPanel";
 import { excluirPerfil } from "./actions";
 
-// Tokens visuais alinhados às 3 classes globais da plataforma
 const OWNER_STYLES = {
   "theme-classic": {
     mainBg: "bg-slate-50 text-slate-900",
@@ -94,10 +95,8 @@ export default function OwnerDashboard() {
 
   const styles = OWNER_STYLES[theme] || OWNER_STYLES["theme-classic"];
 
-  // Controle de Seção Principal: 'perfis' ou 'salas'
   const [currentSection, setCurrentSection] = useState("perfis");
 
-  // Estados dos Usuários
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState(null);
@@ -123,10 +122,8 @@ export default function OwnerDashboard() {
   const handleRoleChange = async (userId, newRole) => {
     const targetUser = users.find((u) => u.id === userId);
 
-    // Otimisticamente atualiza o estado da UI
     setUsers(users.map((u) => (u.id === userId ? { ...u, role: newRole } : u)));
 
-    // 1. Atualiza no Supabase
     const { error: dbError } = await supabase
       .from("profiles")
       .update({ role: newRole })
@@ -139,7 +136,6 @@ export default function OwnerDashboard() {
       return;
     }
 
-    // 2. Sincroniza com os metadados do Clerk para validar no proxy/middleware
     const targetClerkId = targetUser?.clerk_id || targetUser?.id;
 
     if (targetClerkId) {
@@ -163,7 +159,6 @@ export default function OwnerDashboard() {
     }
   };
 
-  // Função para deletar um perfil
   const handleDeleteUser = async (userItem) => {
     const displayName = userItem.name || userItem.email || "este utilizador";
     const confirmacao = window.confirm(
@@ -185,7 +180,6 @@ export default function OwnerDashboard() {
     setDeletingId(null);
   };
 
-  // Peso de ordenação por cargo: Proprietário -> Criador -> Gestor -> Participante
   const rolePriority = {
     owner: 1,
     creator: 2,
@@ -193,7 +187,6 @@ export default function OwnerDashboard() {
     participant: 4,
   };
 
-  // Filtragem e Ordenação Hierárquica
   const filteredUsers = users
     .filter((u) => {
       if (activeTab === "all") return true;
@@ -206,7 +199,6 @@ export default function OwnerDashboard() {
       return priorityA - priorityB;
     });
 
-  // Cálculo de faixa etária protegida (Princípio da Minimização - LGPD)
   const formatAgeFromBirthdate = (dateString) => {
     if (!dateString) return "N/D";
     const birth = new Date(dateString);
@@ -221,7 +213,6 @@ export default function OwnerDashboard() {
     return `${age} anos`;
   };
 
-  // Contadores para as abas
   const counts = {
     all: users.length,
     owner: users.filter((u) => u.role === "owner").length,
@@ -230,7 +221,6 @@ export default function OwnerDashboard() {
     participant: users.filter((u) => !u.role || u.role === "participant").length,
   };
 
-  // Ordem das abas: Proprietários -> Criadores -> Gestores -> Participantes
   const tabs = [
     { id: "all", label: "Todos", count: counts.all, icon: "📋" },
     { id: "owner", label: "Proprietários", count: counts.owner, icon: "👑" },
@@ -244,7 +234,6 @@ export default function OwnerDashboard() {
     },
   ];
 
-  // Formatação Condicional das Linhas
   const getRoleRowStyle = (role) => {
     const currentRole = role || "participant";
     switch (currentRole) {
@@ -264,7 +253,6 @@ export default function OwnerDashboard() {
     <div
       className={`min-h-[calc(100vh-70px)] font-sans transition-colors duration-300 ${styles.mainBg}`}
     >
-      {/* Sub-Banner Administrativo (Sem duplicar o PlatformHeader global) */}
       <section
         className={`pb-16 pt-8 px-6 transition-colors duration-300 ${styles.subBanner}`}
       >
@@ -297,14 +285,13 @@ export default function OwnerDashboard() {
                 Painel de Controle do Proprietário
               </h1>
               <p className={`text-sm ${styles.bannerSubtitle}`}>
-                Gerencie perfis, monitore partidas em tempo real e execute
-                manutenções de legado.
+                Gerencie perfis, acompanhe visitações, monitore partidas em
+                tempo real e execute manutenções de legado.
               </p>
             </div>
 
-            {/* Alternador de Módulos (Perfis vs Salas) */}
             <div
-              className={`flex border p-1.5 rounded-2xl gap-1 self-start md:self-auto ${styles.moduleSwitchBox}`}
+              className={`flex flex-wrap border p-1.5 rounded-2xl gap-1 self-start md:self-auto ${styles.moduleSwitchBox}`}
             >
               <button
                 type="button"
@@ -329,16 +316,26 @@ export default function OwnerDashboard() {
               >
                 <span>🎮</span> Salas & Legado
               </button>
+
+              <button
+                type="button"
+                onClick={() => setCurrentSection("visitacoes")}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-2 ${
+                  currentSection === "visitacoes"
+                    ? "bg-purple-600 text-white shadow-md"
+                    : styles.moduleBtnInactive
+                }`}
+              >
+                <span>📈</span> Visitações
+              </button>
             </div>
           </div>
         </div>
       </section>
 
       <main className="max-w-7xl mx-auto px-6 -mt-8 pb-20 relative z-10">
-        {/* SEÇÃO 1: GESTÃO DE PERFIS */}
         {currentSection === "perfis" && (
           <div className="space-y-6">
-            {/* NAVEGAÇÃO POR ABAS */}
             <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar">
               {tabs.map((tab) => (
                 <button
@@ -366,7 +363,6 @@ export default function OwnerDashboard() {
               ))}
             </div>
 
-            {/* TABELA DE UTILIZADORES COM COLUNA DE AÇÕES */}
             <div
               className={`rounded-3xl border overflow-hidden transition-colors duration-300 ${styles.tableWrapper}`}
             >
@@ -492,10 +488,17 @@ export default function OwnerDashboard() {
           </div>
         )}
 
-        {/* SEÇÃO 2: GESTÃO DE SALAS & LEGADO */}
         {currentSection === "salas" && (
           <div className="space-y-4">
             <AdminRoomsManager />
+          </div>
+        )}
+
+        {currentSection === "visitacoes" && (
+          <div className="space-y-4">
+            {typeof VisitsAnalyticsPanel === "function" && (
+              <VisitsAnalyticsPanel />
+            )}
           </div>
         )}
       </main>
