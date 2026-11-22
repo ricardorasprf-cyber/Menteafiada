@@ -12,6 +12,7 @@
     "watch:push-drive": "node ./scripts/auto-push.js"
   },
   "dependencies": {
+    "@clerk/localizations": "^4.26.3",
     "@clerk/nextjs": "^7.9.17",
     "@google/genai": "^2.31.0",
     "@supabase/supabase-js": "^2.118.0",

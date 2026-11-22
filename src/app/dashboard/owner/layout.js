@@ -1,29 +1,61 @@
-import { auth } from "@clerk/nextjs/server";
-import { supabase } from "@/lib/supabase";
-import { redirect } from "next/navigation";
+/**
+ * ============================================================================
+ * Plataforma Educacional MenteAfiada
+ * Arquivo: src/app/layout.js
+ * Objetivo: Layout raiz da aplicação que injeta globalmente o ClerkProvider
+ * (localizado em pt-BR), LanguageProvider, ThemeProvider, PlatformHeader,
+ * VisitTracker (registro silencioso de visitações) e AfiadinhoAvatar.
+ * ============================================================================
+ */
 
-export default async function OwnerLayout({ children }) {
-  const { userId } = await auth();
+import { ClerkProvider } from "@clerk/nextjs";
+import { ptBR } from "@clerk/localizations";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+import ThemeProvider from "@/app/components/ThemeProvider";
+import PlatformHeader from "@/app/components/PlatformHeader";
+import { LanguageProvider } from "@/contexts/LanguageContext";
+import AfiadinhoAvatar from "@/app/components/AfiadinhoAvatar";
+import { VisitTracker } from "@/app/components/VisitTracker";
 
-  // 1. Se não estiver logado, rua! (Vai para a Home)
-  if (!userId) {
-    redirect('/');
-  }
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
 
-  // 2. Vai à base de dados verificar quem é esta pessoa
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('clerk_id', userId)
-    .single();
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
 
-  // 3. A VERIFICAÇÃO DE SEGURANÇA: Se a role não for 'owner', bloqueia o acesso!
-  if (profile?.role !== 'owner') {
-    // Redireciona de volta para '/dashboard', onde o nosso roteador 
-    // vai apanhá-lo e mandá-lo para o lugar correto (ex: /dashboard/participant)
-    redirect('/dashboard');
-  }
+export const metadata = {
+  title: "MenteAfiada EAD",
+  description: "Plataforma moderna de educação a distância",
+};
 
-  // Se passar no teste de segurança, desenha a página (children)
-  return <>{children}</>;
+export default function RootLayout({ children }) {
+  return (
+    <ClerkProvider
+      localization={ptBR}
+      signInFallbackRedirectUrl="/"
+      signUpFallbackRedirectUrl="/"
+      signInForceRedirectUrl="/"
+      signUpForceRedirectUrl="/"
+    >
+      <html lang="pt-BR" className="theme-classic" suppressHydrationWarning>
+        <body
+          className={`${geistSans.variable} ${geistMono.variable} h-full antialiased bg-[var(--background)] text-[var(--foreground)] transition-colors duration-300`}
+        >
+          <LanguageProvider>
+            <ThemeProvider>
+              <VisitTracker />
+              <PlatformHeader />
+              {children}
+              <AfiadinhoAvatar />
+            </ThemeProvider>
+          </LanguageProvider>
+        </body>
+      </html>
+    </ClerkProvider>
+  );
 }
