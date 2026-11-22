@@ -2,14 +2,15 @@
  * ============================================================================
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/layout.js
- * Objetivo: Layout raiz da aplicação que injeta globalmente o ClerkProvider,
- * LanguageProvider, ThemeProvider, PlatformHeader (cabeçalho unificado em
- * todas as páginas), VisitTracker (registro silencioso de visitações totais
- * e por usuário autenticado) e AfiadinhoAvatar.
+ * Objetivo: Layout raiz da aplicação que injeta globalmente o ClerkProvider
+ * (localizado em pt-BR e apontando explicitamente para /sign-in e /sign-up),
+ * LanguageProvider, ThemeProvider, PlatformHeader, VisitTracker e
+ * AfiadinhoAvatar.
  * ============================================================================
  */
 
 import { ClerkProvider } from "@clerk/nextjs";
+import { ptBR } from "@clerk/localizations";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "@/app/components/ThemeProvider";
@@ -36,6 +37,9 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <ClerkProvider
+      localization={ptBR}
+      signInUrl="/sign-in"
+      signUpUrl="/sign-up"
       signInFallbackRedirectUrl="/"
       signUpFallbackRedirectUrl="/"
       signInForceRedirectUrl="/"
