@@ -21,7 +21,7 @@ import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import { useTheme } from "@/app/components/ThemeProvider";
 import AdminRoomsManager from "@/app/components/AdminRoomsManager";
-import VisitsAnalyticsPanel from "@/app/components/VisitsAnalyticsPanel";
+import { VisitsAnalyticsPanel } from "@/app/components/VisitsAnalyticsPanel";
 import { excluirPerfil } from "./actions";
 
 const OWNER_STYLES = {
@@ -496,9 +496,7 @@ export default function OwnerDashboard() {
 
         {currentSection === "visitacoes" && (
           <div className="space-y-4">
-            {typeof VisitsAnalyticsPanel === "function" && (
-              <VisitsAnalyticsPanel />
-            )}
+            <VisitsAnalyticsPanel />
           </div>
         )}
       </main>
