@@ -124,9 +124,3 @@ export default function ClientPageContent({ userId, userName, userRole }) {
     </div>
   );
 }
-
-```
-
-### Como Aplicar
-
-Clique no botão **Copiar** no final desta mensagem e pressione **`Ctrl + Shift + B`** no VS Code — agora o tema **📜 Papel (`theme-sepia`)** mudará completamente o fundo para pergaminho (`#f7f3e8`), os cartões para marfim (`#fffdf8`) e os destaques para âmbar em toda a tela inicial!

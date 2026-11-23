@@ -283,7 +283,3 @@ export default function ConfiguracoesPage() {
 }
 
 ```
-
-### Como Aplicar
-
-Clique no botão **Copiar** no final desta mensagem e pressione **`Ctrl + Shift + B`** no VS Code — agora o botão do cabeçalho e o seletor rápido alternam exatamente na ordem **☀️ Claro → 📜 Papel → 🌙 Escuro → ⚡ NEON**.
