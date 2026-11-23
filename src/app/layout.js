@@ -2,10 +2,11 @@
  * ============================================================================
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/layout.js
- * Objetivo: Layout raiz da aplicação com ClerkProvider (suportando proxyUrl
- * oficial `/__clerk` em produção na Vercel para domínios `.vercel.app`),
- * localização pt-BR, ThemeProvider (4 temas globais), LanguageProvider,
- * PlatformHeader e VisitTracker.
+ * Objetivo: Layout raiz da aplicação com ClerkProvider configurado com
+ * `proxyUrl` oficial (`https://menteafiada.vercel.app/__clerk`) em produção,
+ * redirecionando todas as chamadas da Frontend API do Clerk através da rota
+ * `/api/clerk-proxy` (via rewrite do `next.config.mjs`) e eliminando qualquer
+ * tentativa de acesso ao subdomínio `clerk.menteafiada.vercel.app`.
  * ============================================================================
  */
 
@@ -38,22 +39,28 @@ export default function RootLayout({ children }) {
   const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
   const isProductionClerk = publishableKey.startsWith("pk_live_");
 
-  // Ativa o proxy oficial `/__clerk` quando rodando em produção no subdomínio .vercel.app
-  const clerkProxyUrl =
-    isProductionClerk && process.env.NODE_ENV === "production"
-      ? "[https://menteafiada.vercel.app/__clerk](https://menteafiada.vercel.app/__clerk)"
-      : undefined;
+  // Em produção com chave pk_live_, força o uso do Proxy Oficial configurado no Clerk Dashboard
+  const clerkProxyUrl = isProductionClerk
+    ? "https://menteafiada.vercel.app/__clerk"
+    : undefined;
 
   return (
-    <ClerkProvider localization="{ptBR}" proxyUrl="{clerkProxyUrl}" signInFallbackRedirectUrl="/dashboard/courses" signInUrl="/sign-in" signUpFallbackRedirectUrl="/completar-perfil" signUpUrl="/sign-up">
+    <ClerkProvider
+      localization={ptBR}
+      proxyUrl={clerkProxyUrl}
+      signInUrl="/sign-in"
+      signUpUrl="/sign-up"
+      signInFallbackRedirectUrl="/dashboard/courses"
+      signUpFallbackRedirectUrl="/completar-perfil"
+    >
       <html lang="pt-BR" className="theme-classic" suppressHydrationWarning>
         <body
           className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}
         >
           <ThemeProvider>
             <LanguageProvider>
-              <VisitTracker/>
-              <PlatformHeader/>
+              <VisitTracker />
+              <PlatformHeader />
               <div className="flex-1 flex flex-col">{children}</div>
             </LanguageProvider>
           </ThemeProvider>

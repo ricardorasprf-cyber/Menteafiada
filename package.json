@@ -27,6 +27,7 @@
     "svix": "^2.9.1"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.5",
     "@tailwindcss/turbopack": "^4",
     "eslint": "^9",
     "eslint-config-next": "^16.4.6",

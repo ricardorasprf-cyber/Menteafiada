@@ -1,45 +1,60 @@
 @import "tailwindcss";
 
+/* ============================================================================
+ * Plataforma Educacional MenteAfiada
+ * Arquivo: src/app/globals.css
+ * Objetivo: Folha de estilos global com Tailwind CSS v4 (@import "tailwindcss")
+ * e as 4 paletas de temas oficiais da plataforma:
+ *   1. theme-classic   -> Claro (MenteAfiada)
+ *   2. theme-sepia     -> Papel / Leitura (Sépia)
+ *   3. theme-dark      -> Modo Escuro (Dark Mode)
+ *   4. theme-synthwave -> NEON / Synthwave
+ * ============================================================================ */
+
 :root,
-html.theme-classic {
+html.theme-classic,
+html[data-theme="classic"] {
   --background: #f8fafc;
   --foreground: #0f172a;
   --card-bg: #ffffff;
   --card-border: #e2e8f0;
-  --accent-primary: #4f46e5;
+  --accent-primary: #7c3aed;
+  --accent-secondary: #3b82f6;
 }
 
-html.theme-dark {
-  --background: #070b19;
-  --foreground: #f1f5f9;
-  --card-bg: #0f172a;
-  --card-border: #1e293b;
-  --accent-primary: #8b5cf6;
-}
-
-html.theme-synthwave {
-  --background: #03040c;
-  --foreground: #ecfeff;
-  --card-bg: #090d22;
-  --card-border: rgba(217, 70, 239, 0.35);
-  --accent-primary: #d946ef;
-}
-
-/* 4º Tema Global: Papel / Leitura Confortável (Sépia) */
-html.theme-sepia {
+html.theme-sepia,
+html[data-theme="sepia"] {
   --background: #f7f3e8;
   --foreground: #292524;
   --card-bg: #fffdf8;
   --card-border: #e6dec8;
   --accent-primary: #b45309;
+  --accent-secondary: #d97706;
 }
 
-/* Aplicação Global das Cores */
-html,
+html.theme-dark,
+html[data-theme="dark"] {
+  --background: #020617;
+  --foreground: #f8fafc;
+  --card-bg: #0f172a;
+  --card-border: #1e293b;
+  --accent-primary: #8b5cf6;
+  --accent-secondary: #3b82f6;
+}
+
+html.theme-synthwave,
+html[data-theme="synthwave"] {
+  --background: #1a0633;
+  --foreground: #fdf2f8;
+  --card-bg: #240b46;
+  --card-border: #ec4899;
+  --accent-primary: #ec4899;
+  --accent-secondary: #06b6d4;
+}
+
 body {
-  background-color: var(--background) !important;
-  color: var(--foreground) !important;
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   transition: background-color 0.25s ease, color 0.25s ease;
-  min-height: 100vh;
 }
