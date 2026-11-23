@@ -2,11 +2,13 @@
  * ============================================================================
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/api/clerk-proxy/[[...path]]/route.js
- * Objetivo: Proxy Reverso Oficial do Clerk em Produção para domínios
- * `.vercel.app` (encaminha requisições `/__clerk/*` para a Frontend API
- * oficial do Clerk com todos os cabeçalhos obrigatórios: `Clerk-Proxy-Url`,
- * `Clerk-Secret-Key`, `X-Forwarded-For`, `X-Forwarded-Proto` e
- * `X-Forwarded-Host`).
+ * Objetivo: Proxy Reverso Completo do Clerk em Produção para domínios
+ * `.vercel.app`:
+ *   1. Roteia bundles estáticos `/__clerk/npm/*` diretamente da CDN oficial
+ *      (`cdn.jsdelivr.net/npm/*`) com cache e MIME type JavaScript;
+ *   2. Roteia todas as chamadas da Frontend API (`/v1/*`, OAuth, sessões)
+ *      para `https://frontend-api.clerk.services` com os cabeçalhos
+ *      obrigatórios `Clerk-Proxy-Url`, `Clerk-Secret-Key` e `X-Forwarded-For`.
  * ============================================================================
  */
 
@@ -15,6 +17,7 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 const CLERK_FRONTEND_API = "https://frontend-api.clerk.services";
+const CLERK_NPM_CDN = "https://cdn.jsdelivr.net";
 const CLERK_PROXY_URL = "https://menteafiada.vercel.app/__clerk";
 
 async function proxyClerkRequest(req, context) {
@@ -22,16 +25,45 @@ async function proxyClerkRequest(req, context) {
     const resolvedParams = await context.params;
     const pathSegments = resolvedParams?.path || [];
     const targetPath = pathSegments.join("/");
-
     const incomingUrl = new URL(req.url);
-    const targetUrl = `${CLERK_FRONTEND_API}/${targetPath}${incomingUrl.search}`;
 
+    // 1. Bundles do SDK (@clerk/clerk-js, @clerk/ui) solicitados sob /__clerk/npm/*
+    if (targetPath.startsWith("npm/")) {
+      const cdnUrl = `${CLERK_NPM_CDN}/${targetPath}${incomingUrl.search}`;
+      const cdnRes = await fetch(cdnUrl, {
+        method: "GET",
+        headers: {
+          "User-Agent": req.headers.get("user-agent") || "MenteAfiada-Proxy/1.0",
+        },
+      });
+
+      if (!cdnRes.ok) {
+        return NextResponse.json(
+          { error: `Falha ao carregar bundle Clerk CDN (${cdnRes.status})` },
+          { status: cdnRes.status }
+        );
+      }
+
+      const scriptBuffer = await cdnRes.arrayBuffer();
+      return new NextResponse(scriptBuffer, {
+        status: 200,
+        headers: {
+          "Content-Type":
+            cdnRes.headers.get("content-type") ||
+            "application/javascript; charset=utf-8",
+          "Cache-Control": "public, max-age=86400, s-maxage=86400",
+        },
+      });
+    }
+
+    // 2. Chamadas da Frontend API do Clerk (/v1/*, OAuth callback, sessões)
+    const targetUrl = `${CLERK_FRONTEND_API}/${targetPath}${incomingUrl.search}`;
     const secretKey = (process.env.CLERK_SECRET_KEY || "").trim();
 
     if (!secretKey) {
-      console.error("[Clerk Proxy] CLERK_SECRET_KEY não configurada no ambiente.");
+      console.error("[Clerk Proxy] CLERK_SECRET_KEY ausente no ambiente.");
       return NextResponse.json(
-        { error: "CLERK_SECRET_KEY ausente nas variáveis de ambiente do servidor." },
+        { error: "CLERK_SECRET_KEY não configurada no servidor." },
         { status: 500 }
       );
     }
@@ -81,18 +113,6 @@ async function proxyClerkRequest(req, context) {
 
     const upstreamResponse = await fetch(targetUrl, fetchOptions);
 
-    if (upstreamResponse.status >= 500) {
-      const errorText = await upstreamResponse.text();
-      console.error(
-        `[Clerk Proxy Upstream ${upstreamResponse.status}] ${targetUrl}:`,
-        errorText.slice(0, 300)
-      );
-      return new NextResponse(errorText, {
-        status: upstreamResponse.status,
-        headers: { "content-type": "application/json" },
-      });
-    }
-
     const responseHeaders = new Headers();
     upstreamResponse.headers.forEach((value, key) => {
       const lowerKey = key.toLowerCase();
@@ -113,9 +133,9 @@ async function proxyClerkRequest(req, context) {
       headers: responseHeaders,
     });
   } catch (err) {
-    console.error("[Clerk Proxy Fatal Error]:", err);
+    console.error("[Clerk Proxy Error]:", err);
     return NextResponse.json(
-      { error: "Falha de conexão com a API do Clerk", detail: err.message },
+      { error: "Falha no proxy reverso do Clerk", detail: err.message },
       { status: 502 }
     );
   }
