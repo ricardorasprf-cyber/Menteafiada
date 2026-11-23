@@ -40,6 +40,7 @@ export default function RootLayout({ children }) {
   const isProductionClerk = publishableKey.startsWith("pk_live_");
 
   // Em produção com chave pk_live_, força o uso do Proxy Oficial configurado no Clerk Dashboard
+  // Em localhost (pk_test_), mantém undefined para funcionar em Development Mode sem proxy
   const clerkProxyUrl = isProductionClerk
     ? "https://menteafiada.vercel.app/__clerk"
     : undefined;
