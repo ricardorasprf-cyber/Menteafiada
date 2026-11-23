@@ -3,8 +3,8 @@
  * Plataforma Educacional MenteAfiada
  * Arquivo: scripts/apply-code.js
  * Objetivo: Aplicador Automático de Arquivos no VS Code a partir da Área de
- * Transferência (Clipboard) com extração cirúrgica entre cercas Markdown
- * (``` ... ```) e leitura estrita em UTF-8.
+ * Transferência (Clipboard) com suporte a `next.config.mjs` e leitura estrita
+ * em UTF-8.
  * Uso: Clique no botão "Copiar" no final da resposta e pressione Ctrl + Shift + B.
  * ============================================================================
  */
@@ -47,11 +47,8 @@ function extractFilesFromClipboard(clipboardText) {
 
   const normalizedText = clipboardText.replace(/\r\n/g, "\n");
 
-  // Captura exclusivamente cabeçalhos no formato:
-  // "### 1. Arquivo Completo: caminho/do/arquivo.ext"
-  // seguidos por bloco cercado ```linguagem ... ```
   const fileBlockRegex =
-    /^#{1,4}\s+\d+\.\s+Arquivo(?:\s+Completo)?(?:\s+Atualizado)?\s*:\s*`?((?:src|scripts|public)\/[a-zA-Z0-9_\-\[\]\.\/]+\.(?:js|jsx|ts|tsx|css|json|sql|md)|(?:package\.json|jsconfig\.json|\.gitignore|vercel\.json))`?\s*\n+```[a-zA-Z0-9_-]*\s*\n([\s\S]*?)\n```(?=\s*\n|$)/gm;
+    /^#{1,4}\s+\d+\.\s+Arquivo(?:\s+Completo)?(?:\s+Atualizado)?\s*:\s*`?((?:src|scripts|public)\/[a-zA-Z0-9_\-\[\]\.\/]+\.(?:js|jsx|ts|tsx|css|json|sql|md)|(?:package\.json|jsconfig\.json|next\.config\.mjs|next\.config\.js|\.gitignore|vercel\.json))`?\s*\n+```[a-zA-Z0-9_-]*\s*\n([\s\S]*?)\n```(?=\s*\n|$)/gm;
 
   let match;
   while ((match = fileBlockRegex.exec(normalizedText)) !== null) {

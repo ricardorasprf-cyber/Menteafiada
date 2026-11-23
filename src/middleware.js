@@ -4,7 +4,7 @@
  * Arquivo: src/middleware.js
  * Objetivo: Middleware de proteção de rotas com Clerk Auth, garantindo acesso
  * público às rotas de autenticação (`/sign-in`, `/sign-up`), proxy reverso
- * `/__clerk(.*)`, webhooks, Arena pública e cron jobs.
+ * `/__clerk(.*)` e `/api/clerk-proxy(.*)`, webhooks, Arena e cron jobs.
  * ============================================================================
  */
 
@@ -15,6 +15,7 @@ const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/__clerk(.*)",
+  "/api/clerk-proxy(.*)",
   "/planos(.*)",
   "/arena(.*)",
   "/game/play(.*)",
