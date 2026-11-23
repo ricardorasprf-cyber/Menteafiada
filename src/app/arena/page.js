@@ -5,12 +5,11 @@
  * Objetivo: Painel central da Arena de Batalhas Educacionais integrado ao
  * ThemeProvider global ("theme-classic", "theme-dark", "theme-synthwave")
  * e ao cabeçalho unificado (PlatformHeader):
- * - Liberação antecipada do link e botão de entrada 5 MINUTOS ANTES de cada
- *   horário oficial (14h, 16h, 18h e 20h - Brasília), mantendo o acesso
- *   visível e ativo durante toda a janela de aquecimento e partida;
- * - Contador regressivo dinâmico para abertura / início da batalha;
- * - Estatísticas da temporada mensal, Liga Educacional, Top 10 e Histórico;
- * - Suporte dinâmico aos modos Claro, Escuro e NEON.
+ * - Liberação antecipada do link e botão de entrada APENAS nos 5 MINUTOS
+ *   anteriores a cada horário oficial (14h, 16h, 18h e 20h - Brasília);
+ * - Encerramento imediato do link de acesso assim que a contagem regressiva
+ *   de 5 minutos termina (exibindo "Inscrições Encerradas • Batalha em Curso");
+ * - Estatísticas da temporada mensal, Liga Educacional, Top 10 e Histórico.
  * ============================================================================
  */
 
@@ -23,9 +22,8 @@ import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useTheme } from "@/app/components/ThemeProvider";
 
-const PRE_OPEN_MINUTES = 5; // Libera entrada na sala 5 minutos antes do início oficial
+const PRE_OPEN_MINUTES = 5; // Janela exclusiva de 5 minutos antes do início oficial
 
-// Tokens visuais alinhados às 3 classes globais da plataforma
 const ARENA_DASHBOARD_STYLES = {
   "theme-classic": {
     mainBg: "bg-slate-50 text-slate-900",
@@ -91,7 +89,6 @@ export default function ArenaDashboardPage() {
   const styles =
     ARENA_DASHBOARD_STYLES[theme] || ARENA_DASHBOARD_STYLES["theme-classic"];
 
-  // Estados de dados da temporada e métricas
   const [activeSeason, setActiveSeason] = useState({
     code: "2026-11",
     title: "Temporada Novembro 2026",
@@ -108,22 +105,20 @@ export default function ArenaDashboardPage() {
   const [battleHistory, setBattleHistory] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Estados do Cronograma e Próximas Salas
   const [activeRooms, setActiveRooms] = useState([]);
   const [upcomingSchedule, setUpcomingSchedule] = useState([]);
   const [ensuringPreOpen, setEnsuringPreOpen] = useState(false);
 
-  // Contador regressivo em tempo real para o banner principal (HH:MM:SS)
   const [nextBattleCountdown, setNextBattleCountdown] = useState({
     targetDate: null,
     targetHourText: "14:00",
     formattedTime: "--:--:--",
-    isPreOpenWindow: false, // True nos 5 minutos anteriores ao início
-    isLiveNow: false,
+    isPreOpenWindow: false, // True SOMENTE nos 5 minutos antes do início
+    isClosedInProgress: false, // True quando a contagem regressiva de 5 min acabou
     livePin: null,
   });
 
-  // 1. Calcula as próximas batalhas mantendo a janela aberta 5 min antes e durante a partida
+  // 1. Calcula as próximas batalhas: libera o link 5 min antes e ENCERRA o link quando a contagem acaba
   const calcularProximosHorarios = useCallback((salasAbertas = []) => {
     const horariosFixos = [14, 16, 18, 20];
     const agora = new Date();
@@ -137,6 +132,8 @@ export default function ArenaDashboardPage() {
     let proximaDataAlvo = null;
     let proximaHoraTexto = "14:00";
     let emJanelaPreAbertura = false;
+    let rodadaJaIniciadaFechada = false;
+    let pinJanelaAtual = null;
 
     while (proximasBatalhas.length < 4 && diaOffset < 7) {
       const dataAlvo = new Date(agora);
@@ -149,17 +146,16 @@ export default function ArenaDashboardPage() {
         const dataAberturaAntecipada = new Date(
           dataInicioBatalha.getTime() - PRE_OPEN_MINUTES * 60 * 1000
         );
-        // Mantém o card da rodada visível até 15 min após o início oficial
+        // Exibe o card informativo da rodada em curso por até 15 min após o início (mas SEM link de entrada)
         const dataFimEstimado = new Date(
           dataInicioBatalha.getTime() + 15 * 60 * 1000
         );
 
         const estaNaJanela5Min =
           agora >= dataAberturaAntecipada && agora < dataInicioBatalha;
-        const estaEmAndamentoHorario =
+        const jaPassouDoInicio =
           agora >= dataInicioBatalha && agora <= dataFimEstimado;
 
-        // Associa sala aberta correspondente ao horário (criada até 10 min antes ou durante)
         const salaAbertaCorrespondente =
           salasAbertas.find((s) => {
             const created = new Date(s.created_at);
@@ -168,18 +164,19 @@ export default function ArenaDashboardPage() {
               (1000 * 60);
             return diffMin <= 20;
           }) ||
-          (estaNaJanela5Min || estaEmAndamentoHorario ? salaAoVivo : null);
+          (estaNaJanela5Min || jaPassouDoInicio ? salaAoVivo : null);
 
-        if (
-          dataFimEstimado > agora ||
-          (diaOffset === 0 && salaAbertaCorrespondente)
-        ) {
+        if (dataFimEstimado > agora) {
           if (!proximaDataAlvo) {
             proximaDataAlvo = estaNaJanela5Min
               ? dataInicioBatalha
               : dataAberturaAntecipada;
             proximaHoraTexto = `${hora}:00h`;
             emJanelaPreAbertura = estaNaJanela5Min;
+            rodadaJaIniciadaFechada = jaPassouDoInicio;
+            pinJanelaAtual = estaNaJanela5Min
+              ? salaAbertaCorrespondente?.pin || null
+              : null;
           }
 
           const diffParaAbrirMs =
@@ -194,11 +191,11 @@ export default function ArenaDashboardPage() {
               0,
               Math.floor((diffParaIniciarMs % 60000) / 1000)
             );
-            tempoRestanteTexto = `Sala aberta! Inicia em ${mins}m ${String(
+            tempoRestanteTexto = `Acesso aberto! Fecha em ${mins}m ${String(
               secs
             ).padStart(2, "0")}s`;
-          } else if (estaEmAndamentoHorario) {
-            tempoRestanteTexto = "Batalha em andamento!";
+          } else if (jaPassouDoInicio) {
+            tempoRestanteTexto = "Acesso encerrado • Partida em curso";
           } else {
             const diffHoras = Math.floor(diffParaAbrirMs / (1000 * 60 * 60));
             const diffMinutos = Math.floor(
@@ -218,10 +215,8 @@ export default function ArenaDashboardPage() {
             month: "2-digit",
           });
 
-          const podeEntrarAgora =
-            estaNaJanela5Min ||
-            estaEmAndamentoHorario ||
-            !!salaAbertaCorrespondente;
+          // REGRA ESTRITA: Link de entrada disponível APENAS durante a contagem de 5 minutos antes do início
+          const podeEntrarAgora = estaNaJanela5Min;
 
           proximasBatalhas.push({
             id: `${diaOffset}-${hora}`,
@@ -238,7 +233,8 @@ export default function ArenaDashboardPage() {
             tempoRestante: tempoRestanteTexto,
             isDisponivel: podeEntrarAgora,
             isPreOpen: estaNaJanela5Min,
-            pin: salaAbertaCorrespondente?.pin || null,
+            isEncerradaEmCurso: jaPassouDoInicio,
+            pin: podeEntrarAgora ? salaAbertaCorrespondente?.pin || null : null,
           });
 
           if (proximasBatalhas.length === 4) break;
@@ -254,8 +250,8 @@ export default function ArenaDashboardPage() {
       targetDate: proximaDataAlvo,
       targetHourText: proximaHoraTexto,
       isPreOpenWindow: emJanelaPreAbertura,
-      isLiveNow: !!salaAoVivo || emJanelaPreAbertura,
-      livePin: salaAoVivo?.pin || null,
+      isClosedInProgress: rodadaJaIniciadaFechada,
+      livePin: pinJanelaAtual,
     }));
   }, []);
 
@@ -277,7 +273,6 @@ export default function ArenaDashboardPage() {
       setActiveRooms(listaSalas);
       calcularProximosHorarios(listaSalas);
 
-      // Consulta temporada ativa
       const { data: seasonData } = await supabase
         .from("arena_seasons")
         .select("season_code, title, rewards_description")
@@ -297,7 +292,6 @@ export default function ArenaDashboardPage() {
         });
       }
 
-      // Consulta Ranking Mensal Geral (Top 10)
       const { data: rankingData } = await supabase
         .from("arena_monthly_rankings")
         .select("clerk_id, player_name, monthly_score, last_battle_at")
@@ -308,7 +302,6 @@ export default function ArenaDashboardPage() {
       const topRank = rankingData || [];
       setLeaderboard(topRank);
 
-      // Consulta Estatísticas Pessoais do Aluno
       if (user?.id) {
         const userRankIndex = topRank.findIndex((r) => r.clerk_id === user.id);
         const userPosition =
@@ -351,7 +344,6 @@ export default function ArenaDashboardPage() {
     }
   }, [user?.id, calcularProximosHorarios]);
 
-  // Aciona automaticamente a criação da sala oficial quando entra na janela de 5 min antes
   const garantirSalaPreAbertura = useCallback(async () => {
     if (ensuringPreOpen) return;
     setEnsuringPreOpen(true);
@@ -367,7 +359,7 @@ export default function ArenaDashboardPage() {
     }
   }, [ensuringPreOpen, carregarDadosCompletosArena]);
 
-  // 3. Temporizador por segundo do Banner Regressivo + Gatilho da Janela de 5 Minutos
+  // 3. Temporizador por segundo: libera o link nos 5 min anteriores e encerra ao zerar
   useEffect(() => {
     const timer = setInterval(() => {
       calcularProximosHorarios(activeRooms);
@@ -382,12 +374,6 @@ export default function ArenaDashboardPage() {
       }
 
       if (!nextBattleCountdown.targetDate) {
-        if (nextBattleCountdown.livePin) {
-          setNextBattleCountdown((prev) => ({
-            ...prev,
-            formattedTime: "AO VIVO!",
-          }));
-        }
         return;
       }
 
@@ -398,12 +384,8 @@ export default function ArenaDashboardPage() {
       if (distancia <= 0) {
         setNextBattleCountdown((prev) => ({
           ...prev,
-          formattedTime: prev.livePin ? "AO VIVO!" : "ABERTA!",
-          isLiveNow: true,
+          formattedTime: "00:00:00",
         }));
-        if (!nextBattleCountdown.livePin && !ensuringPreOpen) {
-          garantirSalaPreAbertura();
-        }
       } else {
         const h = Math.floor(distancia / (1000 * 60 * 60));
         const m = Math.floor((distancia % (1000 * 60 * 60)) / (1000 * 60));
@@ -438,7 +420,6 @@ export default function ArenaDashboardPage() {
     }
   }, [user, isLoaded, carregarDadosCompletosArena]);
 
-  // Inscrição Realtime para atualização instantânea quando a sala abrir
   useEffect(() => {
     const channel = supabase
       .channel("arena-dashboard-realtime")
@@ -454,7 +435,6 @@ export default function ArenaDashboardPage() {
     };
   }, [carregarDadosCompletosArena]);
 
-  // Cálculo da Liga Educacional
   const calcularLiga = (pontos) => {
     if (pontos >= 6000)
       return {
@@ -523,28 +503,33 @@ export default function ArenaDashboardPage() {
               </p>
             </div>
 
-            {/* Painel de Contagem Regressiva / Acesso Antecipado (5 min antes) */}
+            {/* Painel de Contagem Regressiva / Acesso Exclusivo nos 5 Minutos Anteriores */}
             <div className="bg-slate-950/75 border border-purple-500/40 p-5 rounded-2xl w-full md:w-auto flex-shrink-0 space-y-3 backdrop-blur-md shadow-inner text-center md:text-right">
               <div>
                 <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider block">
                   {nextBattleCountdown.isPreOpenWindow
-                    ? `SALA ABERTA • INICIA ÀS ${nextBattleCountdown.targetHourText}`
-                    : nextBattleCountdown.isLiveNow
-                    ? "BATALHA EM ANDAMENTO"
+                    ? `SALA ABERTA • PORTÕES FECHAM EM:`
+                    : nextBattleCountdown.isClosedInProgress
+                    ? `RODADA DAS ${nextBattleCountdown.targetHourText} EM ANDAMENTO`
                     : `ABERTURA DA SALA (${nextBattleCountdown.targetHourText})`}
                 </span>
                 <span
                   className={`text-2xl md:text-3xl font-mono font-black tracking-widest ${
-                    nextBattleCountdown.isLiveNow
+                    nextBattleCountdown.isPreOpenWindow
                       ? "text-emerald-400 animate-pulse"
+                      : nextBattleCountdown.isClosedInProgress
+                      ? "text-rose-400"
                       : "text-white"
                   }`}
                 >
-                  {nextBattleCountdown.formattedTime}
+                  {nextBattleCountdown.isClosedInProgress
+                    ? "ENCERRADA"
+                    : nextBattleCountdown.formattedTime}
                 </span>
               </div>
 
-              {nextBattleCountdown.isLiveNow && nextBattleCountdown.livePin ? (
+              {nextBattleCountdown.isPreOpenWindow &&
+              nextBattleCountdown.livePin ? (
                 <Link
                   href={`/arena/${nextBattleCountdown.livePin}`}
                   className="inline-flex items-center justify-center gap-2 w-full px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-emerald-500/25 transition transform hover:scale-105 cursor-pointer"
@@ -552,7 +537,7 @@ export default function ArenaDashboardPage() {
                   <span>⚔️</span> ENTRAR NA BATALHA AGORA (PIN{" "}
                   {nextBattleCountdown.livePin})
                 </Link>
-              ) : nextBattleCountdown.isLiveNow ? (
+              ) : nextBattleCountdown.isPreOpenWindow ? (
                 <button
                   type="button"
                   onClick={garantirSalaPreAbertura}
@@ -564,10 +549,15 @@ export default function ArenaDashboardPage() {
                     ? "Preparando Sala..."
                     : "LIBERAR ACESSO À SALA AGORA"}
                 </button>
+              ) : nextBattleCountdown.isClosedInProgress ? (
+                <p className="text-[11px] text-rose-300 max-w-xs font-semibold">
+                  🔒 Acesso encerrado para esta rodada. Aguarde a próxima janela
+                  oficial (5 min antes).
+                </p>
               ) : (
                 <p className="text-[11px] text-slate-300 max-w-xs">
-                  O link de entrada é liberado automaticamente{" "}
-                  <strong>5 minutos antes</strong> do início da batalha.
+                  O link de entrada é liberado <strong>5 minutos antes</strong>{" "}
+                  e encerra automaticamente no horário de início.
                 </p>
               )}
             </div>
@@ -575,7 +565,7 @@ export default function ArenaDashboardPage() {
         </div>
 
         {/* ========================================================================= */}
-        {/* SEÇÃO: CRONOGRAMA OFICIAL DAS RODADAS COM ENTRADA 5 MINUTOS ANTES         */}
+        {/* SEÇÃO: CRONOGRAMA OFICIAL DAS RODADAS (ABRE 5 MIN ANTES E FECHA NO INÍCIO) */}
         {/* ========================================================================= */}
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -583,8 +573,8 @@ export default function ArenaDashboardPage() {
               <span>📅</span> Rodadas Oficiais da Arena
             </h2>
             <span className="text-xs font-semibold opacity-65">
-              Horários oficiais de Brasília (14h, 16h, 18h e 20h) • Entrada
-              liberada 5 min antes
+              Horários oficiais de Brasília (14h, 16h, 18h e 20h) • Acesso
+              exclusivo nos 5 min antes
             </span>
           </div>
 
@@ -607,13 +597,15 @@ export default function ArenaDashboardPage() {
                         className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md border ${
                           horario.isDisponivel
                             ? "bg-emerald-500/20 text-emerald-500 border-emerald-500/30 animate-pulse"
+                            : horario.isEncerradaEmCurso
+                            ? "bg-rose-500/15 text-rose-500 border-rose-500/30"
                             : "bg-purple-500/10 text-purple-500 border-purple-500/20"
                         }`}
                       >
                         {horario.isPreOpen
                           ? "🟢 ABERTA (5 MIN)"
-                          : horario.isDisponivel
-                          ? "🟡 SALA ABERTA"
+                          : horario.isEncerradaEmCurso
+                          ? "🔒 ENCERRADA"
                           : horario.diaFormatado}
                       </span>
                       <span className="font-mono font-black text-lg text-amber-500">
@@ -644,6 +636,10 @@ export default function ArenaDashboardPage() {
                       >
                         🚀 Abrir Sala Agora
                       </button>
+                    ) : horario.isEncerradaEmCurso ? (
+                      <span className="text-[11px] text-rose-500 font-bold flex items-center gap-1.5">
+                        <span>🔒</span> {horario.tempoRestante}
+                      </span>
                     ) : (
                       <span className="text-[11px] text-amber-500 font-semibold flex items-center gap-1.5">
                         <span>⏳</span> {horario.tempoRestante}
@@ -734,7 +730,6 @@ export default function ArenaDashboardPage() {
 
         {/* Tabela de Líderes + Histórico */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Top 10 */}
           <div className={`lg:col-span-5 p-6 rounded-3xl border space-y-4 ${styles.panelCard}`}>
             <div className="flex items-center justify-between border-b pb-3 border-inherit">
               <h2 className="text-base font-extrabold flex items-center gap-2">
@@ -791,7 +786,6 @@ export default function ArenaDashboardPage() {
             )}
           </div>
 
-          {/* Histórico de Auditoria */}
           <div className={`lg:col-span-7 p-6 rounded-3xl border space-y-4 ${styles.panelCard}`}>
             <div className="flex items-center justify-between border-b pb-3 border-inherit">
               <h2 className="text-base font-extrabold flex items-center gap-2">
@@ -810,8 +804,8 @@ export default function ArenaDashboardPage() {
                   temporada.
                 </p>
                 <p className="text-[11px] opacity-50 max-w-sm mx-auto">
-                  Acesse as batalhas automáticas com 1 clique nas rodadas das
-                  14h, 16h, 18h e 20h para pontuar!
+                  Acesse as batalhas automáticas nos 5 minutos anteriores às
+                  rodadas das 14h, 16h, 18h e 20h para pontuar!
                 </p>
               </div>
             ) : (
@@ -873,7 +867,6 @@ export default function ArenaDashboardPage() {
         </div>
       </main>
 
-      {/* Rodapé Institucional */}
       <footer
         className={`max-w-7xl w-full mx-auto text-center border-t py-4 px-6 ${styles.footer}`}
       >

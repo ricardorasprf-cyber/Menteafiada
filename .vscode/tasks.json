@@ -2,22 +2,30 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Auto-Push Google Drive (10 min)",
-      "type": "npm",
-      "script": "watch:push-drive",
-      "isBackground": true,
-      "problemMatcher": [],
+      "label": "MenteAfiada: Aplicar Código Copiado (npm run apply)",
+      "type": "shell",
+      "command": "npm run apply",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
       "presentation": {
-        "echo": true,
-        "reveal": "silent",
-        "focus": false,
-        "panel": "dedicated",
-        "showReuseMessage": false,
+        "reveal": "always",
+        "panel": "shared",
         "clear": true
       },
-      "runOptions": {
-        "runOn": "folderOpen"
-      }
+      "problemMatcher": []
+    },
+    {
+      "label": "MenteAfiada: Aplicar + Sincronizar Drive (npm run apply:sync)",
+      "type": "shell",
+      "command": "npm run apply:sync",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
     }
   ]
 }

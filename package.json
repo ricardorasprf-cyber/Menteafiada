@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "apply": "node scripts/apply-code.js",
+    "apply:sync": "node scripts/apply-code.js --sync",
     "push": "git add . && git commit -m \"update\" && git push -u origin main",
     "push-drive": "node scripts/upload-drive.js",
     "watch:push-drive": "node ./scripts/auto-push.js"

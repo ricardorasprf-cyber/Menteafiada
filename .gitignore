@@ -44,6 +44,10 @@ scripts/suas-credenciais-google.json
 google-credentials.json
 suas-credenciais-google.json
 
-# Artefactos de consolidação da base de conhecimento da Gem
+# Artefactos de consolidação da base de conhecimento da Gem (Google Drive)
 base_conhecimento_gem.md
+base_01_app_ui.md
+base_02_apis_lib.md
+base_03_infra_sql.md
+base_04_dashboards_jogo.md
 temp_base.md

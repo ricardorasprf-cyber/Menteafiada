@@ -5,11 +5,18 @@
  * Objetivo: Painel de Controle do Proprietário integrado ao ThemeProvider
  * global ("theme-classic", "theme-dark", "theme-synthwave") e ao cabeçalho
  * unificado (PlatformHeader):
- * - Gestão de perfis com ordenação hierárquica e sincronização Clerk/Supabase;
- * - Cálculo de faixa etária em conformidade com a LGPD;
- * - Alternador entre Gestão de Perfis, Salas & Legado (AdminRoomsManager) e
- *   Controle de Visitações (VisitsAnalyticsPanel - totais e por login);
- * - Suporte dinâmico aos modos Claro, Escuro e NEON.
+ * - Gestão unificada de Perfis & Planos Exclusivos (Proprietário, Institucional,
+ *   Educador Pro, Aluno Pro e Explorador Gratuito) com sincronização
+ *   automática Clerk/Supabase;
+ * - Precificação Dinâmica Vinculada ao Supabase (`subscription_plans`);
+ * - Recepção e Auditoria Financeira em Tempo Real (`payment_transactions`):
+ *   exibe o valor real captalizado via PIX e Cartão (bruto, taxas e líquido),
+ *   faturamento mensal e extrato detalhado de pagamentos efetivados;
+ * - Alternador entre:
+ *   1. Perfis & Planos;
+ *   2. Planos & Receita (Caixa Real PIX + Editor de preços + Extrato);
+ *   3. Salas & Legado (AdminRoomsManager);
+ *   4. Controle de Visitações (VisitsAnalyticsPanel).
  * ============================================================================
  */
 
@@ -41,9 +48,12 @@ const OWNER_STYLES = {
       "bg-white border-slate-200 shadow-xl shadow-slate-200/50 text-slate-900",
     tableHeader: "bg-slate-100/80 border-slate-200 text-slate-600",
     tableDivider: "divide-slate-100",
+    subCard: "bg-slate-50 border-slate-200/80 text-slate-800",
     ageBadge: "bg-slate-100 text-slate-700 border-slate-200",
     roleSelect:
       "bg-white border-slate-300 text-slate-900 focus:ring-indigo-500 focus:border-indigo-500",
+    priceInput:
+      "bg-white border-slate-300 text-slate-900 focus:border-indigo-600",
   },
   "theme-dark": {
     mainBg: "bg-[#070b19] text-slate-100",
@@ -61,9 +71,12 @@ const OWNER_STYLES = {
       "bg-slate-900/90 border-slate-800 shadow-xl shadow-slate-950/60 text-slate-200",
     tableHeader: "bg-slate-950/60 border-slate-800 text-slate-400",
     tableDivider: "divide-slate-800",
+    subCard: "bg-slate-950/80 border-slate-800 text-slate-200",
     ageBadge: "bg-slate-800 text-slate-300 border-slate-700",
     roleSelect:
       "bg-slate-950 border-slate-700 text-white focus:ring-purple-500 focus:border-purple-500",
+    priceInput:
+      "bg-slate-950 border-slate-700 text-white focus:border-purple-500",
   },
   "theme-synthwave": {
     mainBg: "bg-[#03040c] text-cyan-50",
@@ -77,67 +90,234 @@ const OWNER_STYLES = {
     moduleBtnInactive: "text-cyan-200/70 hover:text-cyan-100",
     tabInactive:
       "bg-[#090d22]/90 text-cyan-100/80 hover:border-cyan-400/60 hover:text-white border-indigo-500/30",
-    tabInactiveBadge: "bg-[#040612] text-cyan-300 border border-cyan-500/30",
+    tabInactiveBadge:
+      "bg-[#040612] text-cyan-300 border border-cyan-500/30",
     tableWrapper:
       "bg-[#090d22]/95 border-fuchsia-500/40 shadow-[0_0_35px_rgba(192,38,211,0.18)] text-cyan-50",
     tableHeader: "bg-[#040612] border-fuchsia-500/30 text-cyan-300/80",
     tableDivider: "divide-indigo-500/20",
+    subCard: "bg-[#040612]/90 border-cyan-500/30 text-cyan-100",
     ageBadge: "bg-[#040612] text-cyan-300 border-cyan-500/30",
     roleSelect:
       "bg-[#040612] border-cyan-500/40 text-cyan-100 focus:ring-fuchsia-500 focus:border-fuchsia-500",
+    priceInput:
+      "bg-[#040612] border-cyan-500/40 text-cyan-100 focus:border-fuchsia-500",
   },
 };
+
+const DEFAULT_PLANS_CONFIG = [
+  {
+    id: "free",
+    role_key: "student_free",
+    name: "Explorador",
+    regular_monthly_price: 0,
+    monthly_price: 0,
+    annual_monthly_price: 0,
+    max_quizzes: 3,
+    max_players_per_room: 25,
+  },
+  {
+    id: "student_pro",
+    role_key: "student_pro",
+    name: "Aluno Pro",
+    regular_monthly_price: 24.9,
+    monthly_price: 9.9,
+    annual_monthly_price: 7.4,
+    max_quizzes: 5,
+    max_players_per_room: 25,
+  },
+  {
+    id: "creator_pro",
+    role_key: "creator_pro",
+    name: "Educador Pro",
+    regular_monthly_price: 39.9,
+    monthly_price: 19.9,
+    annual_monthly_price: 14.9,
+    max_quizzes: 9999,
+    max_players_per_room: 300,
+  },
+  {
+    id: "institutional",
+    role_key: "manager",
+    name: "Institucional / Escola",
+    regular_monthly_price: 149.0,
+    monthly_price: 79.9,
+    annual_monthly_price: 59.9,
+    max_quizzes: 9999,
+    max_players_per_room: 1000,
+  },
+];
+
+// Normaliza papéis legados ('creator' -> 'creator_pro', 'participant' -> 'student_free')
+function normalizeUserRole(rawRole) {
+  if (!rawRole || rawRole === "participant" || rawRole === "student_free") {
+    return "student_free";
+  }
+  if (rawRole === "creator" || rawRole === "creator_pro") {
+    return "creator_pro";
+  }
+  return rawRole;
+}
 
 export default function OwnerDashboard() {
   const { user } = useUser();
   const { theme } = useTheme();
   const currentUserId = user?.id;
-
   const styles = OWNER_STYLES[theme] || OWNER_STYLES["theme-classic"];
 
   const [currentSection, setCurrentSection] = useState("perfis");
-
   const [users, setUsers] = useState([]);
+  const [plansConfig, setPlansConfig] = useState(DEFAULT_PLANS_CONFIG);
+  const [transactions, setTransactions] = useState([]);
+  const [savingPlans, setSavingPlans] = useState(false);
+  const [plansFeedback, setPlansFeedback] = useState("");
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState(null);
+  const [savingRoleId, setSavingRoleId] = useState(null);
   const [activeTab, setActiveTab] = useState("all");
 
   useEffect(() => {
-    fetchUsers();
+    fetchInitialData();
   }, []);
 
-  const fetchUsers = async () => {
+  const fetchInitialData = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+
+    // 1. Busca usuários cadastrados
+    const { data: usersData, error: usersErr } = await supabase
       .from("profiles")
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (!error && data) {
-      setUsers(data);
+    if (!usersErr && usersData) {
+      setUsers(usersData);
     }
+
+    // 2. Busca preços vinculados dinamicamente da tabela subscription_plans
+    const { data: dbPlans, error: plansErr } = await supabase
+      .from("subscription_plans")
+      .select("*");
+
+    if (!plansErr && dbPlans && dbPlans.length > 0) {
+      const orderMap = {
+        free: 1,
+        student_pro: 2,
+        creator_pro: 3,
+        institutional: 4,
+      };
+      const sorted = [...dbPlans].sort(
+        (a, b) => (orderMap[a.id] || 9) - (orderMap[b.id] || 9)
+      );
+      setPlansConfig(sorted);
+    }
+
+    // 3. Busca transações financeiras reais (PIX / Cartão) liquidadas
+    const { data: txData, error: txErr } = await supabase
+      .from("payment_transactions")
+      .select("*")
+      .order("paid_at", { ascending: false })
+      .limit(200);
+
+    if (!txErr && txData) {
+      setTransactions(txData);
+    }
+
     setLoading(false);
   };
 
-  const handleRoleChange = async (userId, newRole) => {
-    const targetUser = users.find((u) => u.id === userId);
+  // Helper para obter o preço mensal dinâmico de um papel
+  const getDynamicMonthlyPrice = (roleKey) => {
+    const found = plansConfig.find((p) => p.role_key === roleKey);
+    return found ? Number(found.monthly_price || 0) : 0;
+  };
 
-    setUsers(users.map((u) => (u.id === userId ? { ...u, role: newRole } : u)));
+  const formatBRL = (val) =>
+    Number(val || 0).toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    });
+
+  const formatDateTimeBR = (isoStr) => {
+    if (!isoStr) return "—";
+    return new Date(isoStr).toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  // Atualiza campo de preço no estado local do editor
+  const handlePlanFieldChange = (planId, field, rawValue) => {
+    const numValue = Math.max(0, parseFloat(rawValue) || 0);
+    setPlansConfig((prev) =>
+      prev.map((p) => (p.id === planId ? { ...p, [field]: numValue } : p))
+    );
+  };
+
+  // Salva os novos valores no Supabase (atualizando simultaneamente o painel e /planos)
+  const handleSavePlansPricing = async () => {
+    setSavingPlans(true);
+    setPlansFeedback("");
+
+    try {
+      for (const plan of plansConfig) {
+        const { error } = await supabase.from("subscription_plans").upsert({
+          id: plan.id,
+          role_key: plan.role_key,
+          name: plan.name,
+          regular_monthly_price: Number(plan.regular_monthly_price || 0),
+          monthly_price: Number(plan.monthly_price || 0),
+          annual_monthly_price: Number(plan.annual_monthly_price || 0),
+          max_quizzes: Number(plan.max_quizzes || 3),
+          max_players_per_room: Number(plan.max_players_per_room || 25),
+          updated_at: new Date().toISOString(),
+        });
+
+        if (error) {
+          throw new Error(error.message);
+        }
+      }
+
+      setPlansFeedback(
+        "✅ Valores salvos e sincronizados com a página /planos e o painel!"
+      );
+      setTimeout(() => setPlansFeedback(""), 5000);
+    } catch (err) {
+      setPlansFeedback(
+        `⚠️ Execute primeiro o SQL de criação da tabela subscription_plans no Supabase (${err.message}).`
+      );
+    } finally {
+      setSavingPlans(false);
+    }
+  };
+
+  const handleRoleChange = async (userId, selectedRole) => {
+    const targetUser = users.find((u) => u.id === userId);
+    setSavingRoleId(userId);
+
+    const dbRoleValue =
+      selectedRole === "student_free" ? "participant" : selectedRole;
+
+    setUsers((prev) =>
+      prev.map((u) => (u.id === userId ? { ...u, role: dbRoleValue } : u))
+    );
 
     const { error: dbError } = await supabase
       .from("profiles")
-      .update({ role: newRole })
+      .update({ role: dbRoleValue })
       .eq("id", userId);
 
     if (dbError) {
       console.error("Erro ao atualizar perfil no Supabase:", dbError);
-      alert("Erro ao atualizar o perfil. Tente novamente.");
-      fetchUsers();
+      alert("Erro ao atualizar o perfil no banco. Tente novamente.");
+      fetchInitialData();
+      setSavingRoleId(null);
       return;
     }
 
     const targetClerkId = targetUser?.clerk_id || targetUser?.id;
-
     if (targetClerkId) {
       try {
         const res = await fetch("/api/admin/update-role", {
@@ -145,7 +325,13 @@ export default function OwnerDashboard() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             targetClerkId,
-            newRole,
+            newRole: dbRoleValue,
+            planTier:
+              selectedRole === "student_free"
+                ? "free"
+                : selectedRole === "manager"
+                ? "institutional"
+                : selectedRole,
           }),
         });
 
@@ -157,6 +343,8 @@ export default function OwnerDashboard() {
         console.error("Falha na chamada de sincronização com o Clerk:", err);
       }
     }
+
+    setSavingRoleId(null);
   };
 
   const handleDeleteUser = async (userItem) => {
@@ -169,7 +357,6 @@ export default function OwnerDashboard() {
 
     setDeletingId(userItem.id);
     const targetClerkId = userItem.clerk_id || userItem.id;
-
     const res = await excluirPerfil(userItem.id, targetClerkId);
 
     if (res.success) {
@@ -182,20 +369,21 @@ export default function OwnerDashboard() {
 
   const rolePriority = {
     owner: 1,
-    creator: 2,
-    manager: 3,
-    participant: 4,
+    manager: 2,
+    creator_pro: 3,
+    student_pro: 4,
+    student_free: 5,
   };
 
   const filteredUsers = users
     .filter((u) => {
       if (activeTab === "all") return true;
-      const role = u.role || "participant";
-      return role === activeTab;
+      const norm = normalizeUserRole(u.role);
+      return norm === activeTab;
     })
     .sort((a, b) => {
-      const priorityA = rolePriority[a.role || "participant"] || 5;
-      const priorityB = rolePriority[b.role || "participant"] || 5;
+      const priorityA = rolePriority[normalizeUserRole(a.role)] || 6;
+      const priorityB = rolePriority[normalizeUserRole(b.role)] || 6;
       return priorityA - priorityB;
     });
 
@@ -203,7 +391,6 @@ export default function OwnerDashboard() {
     if (!dateString) return "N/D";
     const birth = new Date(dateString);
     if (isNaN(birth.getTime())) return "N/D";
-
     const today = new Date();
     let age = today.getFullYear() - birth.getFullYear();
     const m = today.getMonth() - birth.getMonth();
@@ -215,37 +402,141 @@ export default function OwnerDashboard() {
 
   const counts = {
     all: users.length,
-    owner: users.filter((u) => u.role === "owner").length,
-    creator: users.filter((u) => u.role === "creator").length,
-    manager: users.filter((u) => u.role === "manager").length,
-    participant: users.filter((u) => !u.role || u.role === "participant").length,
+    owner: users.filter((u) => normalizeUserRole(u.role) === "owner").length,
+    manager: users.filter((u) => normalizeUserRole(u.role) === "manager")
+      .length,
+    creator_pro: users.filter(
+      (u) => normalizeUserRole(u.role) === "creator_pro"
+    ).length,
+    student_pro: users.filter(
+      (u) => normalizeUserRole(u.role) === "student_pro"
+    ).length,
+    student_free: users.filter(
+      (u) => normalizeUserRole(u.role) === "student_free"
+    ).length,
   };
+
+  // Indicadores Financeiros: Caixa Real (PIX/Cartão efetivados) vs. Projeção MRR
+  const approvedTransactions = transactions.filter(
+    (t) => t.status === "approved"
+  );
+
+  const realCapitalizedGross = approvedTransactions.reduce(
+    (acc, t) => acc + Number(t.gross_amount || 0),
+    0
+  );
+
+  const realCapitalizedNet = approvedTransactions.reduce(
+    (acc, t) => acc + Number(t.net_amount || t.gross_amount || 0),
+    0
+  );
+
+  const pixTransactions = approvedTransactions.filter(
+    (t) => String(t.payment_method).toLowerCase() === "pix"
+  );
+
+  const realPixTotal = pixTransactions.reduce(
+    (acc, t) => acc + Number(t.net_amount || t.gross_amount || 0),
+    0
+  );
+
+  const now = new Date();
+  const currentMonthRevenue = approvedTransactions
+    .filter((t) => {
+      const d = new Date(t.paid_at);
+      return (
+        d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+      );
+    })
+    .reduce(
+      (acc, t) => acc + Number(t.net_amount || t.gross_amount || 0),
+      0
+    );
+
+  const estimatedMRR = users.reduce((acc, u) => {
+    const norm = normalizeUserRole(u.role);
+    return acc + getDynamicMonthlyPrice(norm);
+  }, 0);
+
+  const activePaidAccounts =
+    counts.manager + counts.creator_pro + counts.student_pro;
 
   const tabs = [
     { id: "all", label: "Todos", count: counts.all, icon: "📋" },
     { id: "owner", label: "Proprietários", count: counts.owner, icon: "👑" },
-    { id: "creator", label: "Criadores", count: counts.creator, icon: "🎨" },
-    { id: "manager", label: "Gestores", count: counts.manager, icon: "🏢" },
     {
-      id: "participant",
-      label: "Participantes",
-      count: counts.participant,
+      id: "manager",
+      label: "Institucional",
+      count: counts.manager,
+      icon: "🏫",
+    },
+    {
+      id: "creator_pro",
+      label: "Educador Pro",
+      count: counts.creator_pro,
+      icon: "🚀",
+    },
+    {
+      id: "student_pro",
+      label: "Aluno Pro",
+      count: counts.student_pro,
       icon: "🎓",
+    },
+    {
+      id: "student_free",
+      label: "Explorador (Grátis)",
+      count: counts.student_free,
+      icon: "🌱",
     },
   ];
 
-  const getRoleRowStyle = (role) => {
-    const currentRole = role || "participant";
-    switch (currentRole) {
+  const getRoleRowStyle = (rawRole) => {
+    const norm = normalizeUserRole(rawRole);
+    switch (norm) {
       case "owner":
         return "bg-amber-500/10 hover:bg-amber-500/15 border-l-4 border-amber-500";
-      case "creator":
-        return "bg-purple-500/10 hover:bg-purple-500/15 border-l-4 border-purple-500";
       case "manager":
-        return "bg-blue-500/10 hover:bg-blue-500/15 border-l-4 border-blue-500";
-      case "participant":
+        return "bg-cyan-500/10 hover:bg-cyan-500/15 border-l-4 border-cyan-500";
+      case "creator_pro":
+        return "bg-purple-500/10 hover:bg-purple-500/15 border-l-4 border-purple-500";
+      case "student_pro":
+        return "bg-indigo-500/10 hover:bg-indigo-500/15 border-l-4 border-indigo-500";
+      case "student_free":
       default:
         return "bg-emerald-500/10 hover:bg-emerald-500/15 border-l-4 border-emerald-500";
+    }
+  };
+
+  const getPlanBadgeDisplay = (rawRole) => {
+    const norm = normalizeUserRole(rawRole);
+    const dynamicPrice = getDynamicMonthlyPrice(norm);
+
+    switch (norm) {
+      case "owner":
+        return {
+          text: "Acesso Master",
+          cls: "bg-amber-500/15 text-amber-500 border-amber-500/30",
+        };
+      case "manager":
+        return {
+          text: `Institucional • ${formatBRL(dynamicPrice)}/mês`,
+          cls: "bg-cyan-500/15 text-cyan-500 border-cyan-500/30",
+        };
+      case "creator_pro":
+        return {
+          text: `Educador Pro • ${formatBRL(dynamicPrice)}/mês`,
+          cls: "bg-purple-500/15 text-purple-500 border-purple-500/30",
+        };
+      case "student_pro":
+        return {
+          text: `Aluno Pro • ${formatBRL(dynamicPrice)}/mês`,
+          cls: "bg-indigo-500/15 text-indigo-500 border-indigo-500/30",
+        };
+      default:
+        return {
+          text: `Explorador • ${formatBRL(dynamicPrice)}`,
+          cls: "bg-slate-500/15 text-slate-400 border-slate-500/30",
+        };
     }
   };
 
@@ -253,6 +544,7 @@ export default function OwnerDashboard() {
     <div
       className={`min-h-[calc(100vh-70px)] font-sans transition-colors duration-300 ${styles.mainBg}`}
     >
+      {/* Banner Administrativo Superior */}
       <section
         className={`pb-16 pt-8 px-6 transition-colors duration-300 ${styles.subBanner}`}
       >
@@ -277,227 +569,549 @@ export default function OwnerDashboard() {
             Voltar para a Página Inicial
           </Link>
 
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div>
               <h1
                 className={`text-3xl md:text-4xl font-extrabold mb-2 ${styles.bannerTitle}`}
               >
                 Painel de Controle do Proprietário
               </h1>
-              <p className={`text-sm ${styles.bannerSubtitle}`}>
-                Gerencie perfis, acompanhe visitações, monitore partidas em
-                tempo real e execute manutenções de legado.
+              <p className={`text-sm md:text-base ${styles.bannerSubtitle}`}>
+                Gestão centralizada de perfis, caixa real PIX, valores dos
+                planos, salas ativas e visitações.
               </p>
             </div>
 
+            {/* Seletor de Módulo Administrativo */}
             <div
-              className={`flex flex-wrap border p-1.5 rounded-2xl gap-1 self-start md:self-auto ${styles.moduleSwitchBox}`}
+              className={`flex flex-wrap items-center p-1.5 rounded-2xl border gap-1.5 self-start lg:self-auto ${styles.moduleSwitchBox}`}
             >
               <button
                 type="button"
                 onClick={() => setCurrentSection("perfis")}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-2 ${
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold whitespace-nowrap transition cursor-pointer ${
                   currentSection === "perfis"
-                    ? "bg-purple-600 text-white shadow-md"
+                    ? "bg-purple-600 text-white shadow"
                     : styles.moduleBtnInactive
                 }`}
               >
-                <span>👥</span> Gestão de Perfis
+                👥 Perfis & Planos
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCurrentSection("assinaturas")}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold whitespace-nowrap transition cursor-pointer ${
+                  currentSection === "assinaturas"
+                    ? "bg-emerald-600 text-white shadow"
+                    : styles.moduleBtnInactive
+                }`}
+              >
+                💳 Planos & Receita
               </button>
 
               <button
                 type="button"
                 onClick={() => setCurrentSection("salas")}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-2 ${
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold whitespace-nowrap transition cursor-pointer ${
                   currentSection === "salas"
-                    ? "bg-purple-600 text-white shadow-md"
+                    ? "bg-indigo-600 text-white shadow"
                     : styles.moduleBtnInactive
                 }`}
               >
-                <span>🎮</span> Salas & Legado
+                🎮 Salas & Legado
               </button>
 
               <button
                 type="button"
-                onClick={() => setCurrentSection("visitacoes")}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-2 ${
-                  currentSection === "visitacoes"
-                    ? "bg-purple-600 text-white shadow-md"
+                onClick={() => setCurrentSection("visitas")}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold whitespace-nowrap transition cursor-pointer ${
+                  currentSection === "visitas"
+                    ? "bg-cyan-600 text-white shadow"
                     : styles.moduleBtnInactive
                 }`}
               >
-                <span>📈</span> Visitações
+                📊 Visitações
               </button>
             </div>
           </div>
         </div>
       </section>
 
+      {/* Conteúdo Principal */}
       <main className="max-w-7xl mx-auto px-6 -mt-8 pb-20 relative z-10">
-        {currentSection === "perfis" && (
+        {currentSection === "visitas" ? (
+          <VisitsAnalyticsPanel />
+        ) : currentSection === "salas" ? (
+          <AdminRoomsManager />
+        ) : currentSection === "assinaturas" ? (
+          /* ================================================================= */
+          /* MÓDULO: CAIXA REAL PIX + EDITOR DE PREÇOS + EXTRATO DE PAGAMENTOS */
+          /* ================================================================= */
           <div className="space-y-6">
-            <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold transition-all whitespace-nowrap cursor-pointer border ${
-                    activeTab === tab.id
-                      ? "bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-500/25"
-                      : styles.tabInactive
-                  }`}
+            {/* Cards de Recepção Financeira Real vs. Projeção */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div
+                className={`rounded-3xl p-6 border space-y-1 ${styles.tableWrapper}`}
+              >
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-500 block">
+                  💠 CAPITAL EFETIVO RECEBIDO (LÍQUIDO)
+                </span>
+                <p className="text-3xl font-black text-emerald-500">
+                  {formatBRL(realCapitalizedNet)}
+                </p>
+                <span className="text-xs opacity-70 block">
+                  {approvedTransactions.length} pagamento(s) liquidado(s) • Bruto:{" "}
+                  {formatBRL(realCapitalizedGross)}
+                </span>
+              </div>
+
+              <div
+                className={`rounded-3xl p-6 border space-y-1 ${styles.tableWrapper}`}
+              >
+                <span className="text-[10px] font-black uppercase tracking-wider text-cyan-500 block">
+                  ⚡ ENTRADAS VIA PIX INSTANTÂNEO
+                </span>
+                <p className="text-3xl font-black text-cyan-500">
+                  {formatBRL(realPixTotal)}
+                </p>
+                <span className="text-xs opacity-70 block">
+                  {pixTransactions.length} transação(ões) PIX confirmada(s)
+                </span>
+              </div>
+
+              <div
+                className={`rounded-3xl p-6 border space-y-1 ${styles.tableWrapper}`}
+              >
+                <span className="text-[10px] font-black uppercase tracking-wider text-indigo-500 block">
+                  📅 FATURAMENTO REAL NO MÊS ATUAL
+                </span>
+                <p className="text-3xl font-black text-indigo-500">
+                  {formatBRL(currentMonthRevenue)}
+                </p>
+                <span className="text-xs opacity-70 block">
+                  MRR potencial dos perfis: {formatBRL(estimatedMRR)}
+                </span>
+              </div>
+
+              <div
+                className={`rounded-3xl p-6 border space-y-1 ${styles.tableWrapper}`}
+              >
+                <span className="text-[10px] font-black uppercase tracking-wider text-amber-500 block">
+                  👥 ASSINANTES & BASE GRATUITA
+                </span>
+                <p className="text-3xl font-black text-amber-500">
+                  {activePaidAccounts}{" "}
+                  <span className="text-sm font-bold opacity-70">
+                    / {users.length}
+                  </span>
+                </p>
+                <span className="text-xs opacity-70 block">
+                  {counts.student_pro} Aluno Pro • {counts.creator_pro} Educador
+                  Pro • {counts.manager} Escolas
+                </span>
+              </div>
+            </div>
+
+            {/* Editor Vinculado de Preços (Sincroniza com /planos e MRR) */}
+            <div
+              className={`rounded-3xl p-6 md:p-8 border space-y-6 ${styles.tableWrapper}`}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-black">
+                    💎 Tabela de Preços Vinculada (Sincronização Global)
+                  </h2>
+                  <p className="text-xs opacity-70 mt-1">
+                    Altere os valores abaixo e clique em{" "}
+                    <strong>Salvar Tabela de Preços</strong>: a página pública{" "}
+                    <code>/planos</code>, os crachás dos usuários e o checkout
+                    PIX passam a cobrar os novos valores automaticamente.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2.5">
+                  <Link
+                    href="/planos"
+                    className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold transition"
+                  >
+                    Abrir Vitrine (/planos) ↗
+                  </Link>
+                  <button
+                    type="button"
+                    disabled={savingPlans}
+                    onClick={handleSavePlansPricing}
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold transition cursor-pointer shadow disabled:opacity-50"
+                  >
+                    {savingPlans
+                      ? "Salvando no Banco..."
+                      : "💾 Salvar Tabela de Preços"}
+                  </button>
+                </div>
+              </div>
+
+              {plansFeedback && (
+                <div className="p-3.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-xs font-bold text-emerald-500">
+                  {plansFeedback}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                {plansConfig.map((plan) => (
+                  <div
+                    key={plan.id}
+                    className={`p-5 rounded-2xl border space-y-3.5 ${styles.subCard}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-black">{plan.name}</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-500 font-bold">
+                        {plan.role_key}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2.5 text-xs">
+                      <div>
+                        <label className="block text-[11px] opacity-70 font-bold mb-1">
+                          Valor Regular Ancorado (De R$):
+                        </label>
+                        <input
+                          type="number"
+                          step="0.10"
+                          min="0"
+                          disabled={plan.id === "free"}
+                          value={plan.regular_monthly_price}
+                          onChange={(e) =>
+                            handlePlanFieldChange(
+                              plan.id,
+                              "regular_monthly_price",
+                              e.target.value
+                            )
+                          }
+                          className={`w-full px-3 py-2 rounded-xl border text-xs font-bold outline-none disabled:opacity-40 ${styles.priceInput}`}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] opacity-70 font-bold mb-1">
+                          Mensal Vigente (R$/mês):
+                        </label>
+                        <input
+                          type="number"
+                          step="0.10"
+                          min="0"
+                          disabled={plan.id === "free"}
+                          value={plan.monthly_price}
+                          onChange={(e) =>
+                            handlePlanFieldChange(
+                              plan.id,
+                              "monthly_price",
+                              e.target.value
+                            )
+                          }
+                          className={`w-full px-3 py-2 rounded-xl border text-xs font-black text-emerald-500 outline-none disabled:opacity-40 ${styles.priceInput}`}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] opacity-70 font-bold mb-1">
+                          Plano Anual (equiv. R$/mês):
+                        </label>
+                        <input
+                          type="number"
+                          step="0.10"
+                          min="0"
+                          disabled={plan.id === "free"}
+                          value={plan.annual_monthly_price}
+                          onChange={(e) =>
+                            handlePlanFieldChange(
+                              plan.id,
+                              "annual_monthly_price",
+                              e.target.value
+                            )
+                          }
+                          className={`w-full px-3 py-2 rounded-xl border text-xs font-bold outline-none disabled:opacity-40 ${styles.priceInput}`}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Extrato de Pagamentos Efetivos Recepcionados (PIX & Cartão) */}
+            <div
+              className={`rounded-3xl p-6 md:p-8 border space-y-5 ${styles.tableWrapper}`}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-xl font-black">
+                    🧾 Extrato de Pagamentos Efetivos (PIX & Cartão)
+                  </h2>
+                  <p className="text-xs opacity-70 mt-0.5">
+                    Cada liquidação confirmada pelo Webhook do gateway aparece
+                    automaticamente aqui e promove o perfil do comprador.
+                  </p>
+                </div>
+                <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
+                  {approvedTransactions.length} liquidação(ões) confirmada(s)
+                </span>
+              </div>
+
+              {transactions.length === 0 ? (
+                <div
+                  className={`p-8 rounded-2xl border text-center space-y-2 ${styles.subCard}`}
                 >
-                  <span>{tab.icon}</span>
-                  <span>{tab.label}</span>
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full ${
-                      activeTab === tab.id
-                        ? "bg-white/20 text-white"
-                        : styles.tabInactiveBadge
+                  <span className="text-3xl block">💠</span>
+                  <p className="text-sm font-extrabold">
+                    Nenhuma transação PIX/Cartão liquidada ainda
+                  </p>
+                  <p className="text-xs opacity-70 max-w-lg mx-auto">
+                    Assim que o gateway de pagamento (Mercado Pago, Asaas ou
+                    Stripe) for conectado e o primeiro cliente concluir um PIX,
+                    o valor bruto, a taxa descontada e o valor líquido
+                    aparecerão automaticamente neste livro-razão.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr
+                        className={`border-b text-[11px] font-bold uppercase tracking-wider ${styles.tableHeader}`}
+                      >
+                        <th className="py-3.5 px-4">Data / Hora</th>
+                        <th className="py-3.5 px-4">Pagador</th>
+                        <th className="py-3.5 px-4">Plano / Produto</th>
+                        <th className="py-3.5 px-4 text-center">Método</th>
+                        <th className="py-3.5 px-4 text-right">Bruto</th>
+                        <th className="py-3.5 px-4 text-right">Taxa</th>
+                        <th className="py-3.5 px-4 text-right">Líquido</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${styles.tableDivider}`}>
+                      {transactions.map((tx) => (
+                        <tr key={tx.id}>
+                          <td className="py-3.5 px-4 font-mono opacity-80 whitespace-nowrap">
+                            {formatDateTimeBR(tx.paid_at)}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <p className="font-bold">{tx.payer_name}</p>
+                            <p className="text-[11px] opacity-65">
+                              {tx.payer_email || "—"}
+                            </p>
+                          </td>
+                          <td className="py-3.5 px-4 font-semibold">
+                            {tx.plan_name}
+                          </td>
+                          <td className="py-3.5 px-4 text-center">
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-cyan-500/15 text-cyan-500 border border-cyan-500/30">
+                              {tx.payment_method}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-right font-mono opacity-80">
+                            {formatBRL(tx.gross_amount)}
+                          </td>
+                          <td className="py-3.5 px-4 text-right font-mono text-rose-500">
+                            -{formatBRL(tx.gateway_fee)}
+                          </td>
+                          <td className="py-3.5 px-4 text-right font-mono font-black text-emerald-500">
+                            {formatBRL(tx.net_amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* ================================================================= */
+          /* MÓDULO: GESTÃO DE PERFIS & PLANOS DE USUÁRIOS                     */
+          /* ================================================================= */
+          <>
+            <div className="flex flex-wrap gap-2 mb-6">
+              {tabs.map((tab) => {
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer border ${
+                      isActive
+                        ? "bg-purple-600 text-white border-purple-500 shadow-lg shadow-purple-500/20 scale-105"
+                        : styles.tabInactive
                     }`}
                   >
-                    {tab.count}
-                  </span>
-                </button>
-              ))}
+                    <span>{tab.icon}</span>
+                    <span>{tab.label}</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                        isActive
+                          ? "bg-purple-800 text-purple-100"
+                          : styles.tabInactiveBadge
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
             <div
               className={`rounded-3xl border overflow-hidden transition-colors duration-300 ${styles.tableWrapper}`}
             >
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr
-                      className={`border-b text-xs uppercase tracking-wider ${styles.tableHeader}`}
-                    >
-                      <th className="p-4 font-bold">Nome</th>
-                      <th className="p-4 font-bold">Email</th>
-                      <th className="p-4 font-bold">Idade (LGPD)</th>
-                      <th className="p-4 font-bold">Cargo (Role)</th>
-                      <th className="p-4 font-bold text-center">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody className={`divide-y ${styles.tableDivider}`}>
-                    {loading ? (
-                      <tr>
-                        <td
-                          colSpan="5"
-                          className="p-8 text-center opacity-60 font-medium"
-                        >
-                          A carregar utilizadores...
-                        </td>
+              {loading ? (
+                <div className="p-12 text-center opacity-60 font-medium">
+                  Carregando contas e perfis...
+                </div>
+              ) : filteredUsers.length === 0 ? (
+                <div className="p-12 text-center opacity-60 font-medium">
+                  Nenhum usuário encontrado nesta categoria.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr
+                        className={`border-b text-[11px] font-bold uppercase tracking-wider ${styles.tableHeader}`}
+                      >
+                        <th className="py-4 px-5">Utilizador</th>
+                        <th className="py-4 px-5">E-mail</th>
+                        <th className="py-4 px-5">Idade</th>
+                        <th className="py-4 px-5">Plano Vigente</th>
+                        <th className="py-4 px-5">Perfil / Atribuição</th>
+                        <th className="py-4 px-5 text-right">Ações</th>
                       </tr>
-                    ) : filteredUsers.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan="5"
-                          className="p-8 text-center opacity-60 font-medium"
-                        >
-                          Nenhum utilizador encontrado nesta categoria.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredUsers.map((userItem) => {
+                    </thead>
+                    <tbody className={`divide-y ${styles.tableDivider}`}>
+                      {filteredUsers.map((u) => {
                         const isSelf =
-                          userItem.clerk_id === currentUserId ||
-                          userItem.email ===
-                            user?.primaryEmailAddress?.emailAddress;
+                          currentUserId &&
+                          (u.clerk_id === currentUserId ||
+                            u.id === currentUserId);
+                        const isDeleting = deletingId === u.id;
+                        const isSavingRole = savingRoleId === u.id;
+                        const normalizedRole = normalizeUserRole(u.role);
+                        const planBadge = getPlanBadgeDisplay(u.role);
 
                         return (
                           <tr
-                            key={userItem.id}
-                            className={`transition-all ${getRoleRowStyle(
-                              userItem.role
+                            key={u.id}
+                            className={`transition-colors ${getRoleRowStyle(
+                              u.role
                             )}`}
                           >
-                            <td className="p-4 font-bold flex items-center gap-2">
-                              <span>
-                                {userItem.role === "owner" && "👑"}
-                                {userItem.role === "creator" && "🎨"}
-                                {userItem.role === "manager" && "🏢"}
-                                {(!userItem.role ||
-                                  userItem.role === "participant") &&
-                                  "🎓"}
-                              </span>
-                              <span>{userItem.name || "Sem Nome"}</span>
-                            </td>
-                            <td className="p-4 font-mono text-xs md:text-sm opacity-80">
-                              {userItem.email}
-                            </td>
-                            <td className="p-4 text-sm font-medium">
-                              <span
-                                className={`px-2.5 py-1 rounded-md border font-mono text-xs ${styles.ageBadge}`}
-                              >
-                                {formatAgeFromBirthdate(
-                                  userItem.data_nascimento
-                                )}
-                              </span>
-                            </td>
-                            <td className="p-4">
-                              <select
-                                value={userItem.role || "participant"}
-                                onChange={(e) =>
-                                  handleRoleChange(userItem.id, e.target.value)
-                                }
-                                className={`border text-sm rounded-lg block w-full p-2 cursor-pointer outline-none font-bold backdrop-blur-sm ${styles.roleSelect}`}
-                              >
-                                <option value="owner">
-                                  👑 Proprietário (Admin)
-                                </option>
-                                <option value="creator">🎨 Criador</option>
-                                <option value="manager">🏢 Gestor</option>
-                                <option value="participant">
-                                  🎓 Participante (Aluno)
-                                </option>
-                              </select>
-                            </td>
-                            <td className="p-4 text-center">
-                              {isSelf ? (
-                                <span className="text-xs opacity-50 italic font-semibold">
+                            <td className="py-4 px-5 font-semibold whitespace-nowrap">
+                              {u.name || "Sem Nome"}
+                              {isSelf && (
+                                <span className="ml-2 text-[10px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full font-bold">
                                   Você
                                 </span>
-                              ) : (
+                              )}
+                            </td>
+
+                            <td className="py-4 px-5 text-sm opacity-80">
+                              {u.email || "—"}
+                            </td>
+
+                            <td className="py-4 px-5 text-xs font-bold whitespace-nowrap">
+                              <span
+                                className={`px-2.5 py-1 rounded-lg border ${styles.ageBadge}`}
+                              >
+                                {formatAgeFromBirthdate(u.birth_date)}
+                              </span>
+                            </td>
+
+                            <td className="py-4 px-5 text-xs whitespace-nowrap">
+                              <span
+                                className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${planBadge.cls}`}
+                              >
+                                {planBadge.text}
+                              </span>
+                            </td>
+
+                            <td className="py-4 px-5 text-sm whitespace-nowrap">
+                              <div className="flex items-center gap-2">
+                                <select
+                                  value={normalizedRole}
+                                  disabled={isSavingRole}
+                                  onChange={(e) =>
+                                    handleRoleChange(u.id, e.target.value)
+                                  }
+                                  className={`border rounded-xl px-3 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 transition cursor-pointer disabled:opacity-50 ${styles.roleSelect}`}
+                                >
+                                  <option value="student_free">
+                                    🌱 Explorador (
+                                    {formatBRL(
+                                      getDynamicMonthlyPrice("student_free")
+                                    )}
+                                    )
+                                  </option>
+                                  <option value="student_pro">
+                                    🎓 Aluno Pro (
+                                    {formatBRL(
+                                      getDynamicMonthlyPrice("student_pro")
+                                    )}
+                                    )
+                                  </option>
+                                  <option value="creator_pro">
+                                    🚀 Educador Pro (
+                                    {formatBRL(
+                                      getDynamicMonthlyPrice("creator_pro")
+                                    )}
+                                    )
+                                  </option>
+                                  <option value="manager">
+                                    🏫 Institucional (
+                                    {formatBRL(
+                                      getDynamicMonthlyPrice("manager")
+                                    )}
+                                    )
+                                  </option>
+                                  <option value="owner">
+                                    👑 Proprietário
+                                  </option>
+                                </select>
+                                {isSavingRole && (
+                                  <span className="text-[11px] text-indigo-500 font-bold animate-pulse">
+                                    Salvando...
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="py-4 px-5 text-right whitespace-nowrap">
+                              {!isSelf ? (
                                 <button
                                   type="button"
-                                  onClick={() => handleDeleteUser(userItem)}
-                                  disabled={deletingId === userItem.id}
-                                  className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 hover:text-red-400 border border-red-500/30 rounded-xl text-xs font-bold transition duration-150 cursor-pointer disabled:opacity-50 inline-flex items-center gap-1 shadow-sm"
-                                  title="Excluir perfil permanentemente"
+                                  disabled={isDeleting}
+                                  onClick={() => handleDeleteUser(u)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 transition disabled:opacity-50 cursor-pointer"
+                                  title="Excluir conta permanentemente"
                                 >
-                                  {deletingId === userItem.id ? (
-                                    <span>Apagando...</span>
-                                  ) : (
-                                    <>
-                                      <span>🗑️</span>
-                                      <span>Excluir</span>
-                                    </>
-                                  )}
+                                  <span>🗑️</span>
+                                  <span>
+                                    {isDeleting ? "Excluindo..." : "Excluir"}
+                                  </span>
                                 </button>
+                              ) : (
+                                <span className="text-[11px] opacity-50 italic">
+                                  Protegido
+                                </span>
                               )}
                             </td>
                           </tr>
                         );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-          </div>
-        )}
-
-        {currentSection === "salas" && (
-          <div className="space-y-4">
-            <AdminRoomsManager />
-          </div>
-        )}
-
-        {currentSection === "visitacoes" && (
-          <div className="space-y-4">
-            <VisitsAnalyticsPanel />
-          </div>
+          </>
         )}
       </main>
     </div>

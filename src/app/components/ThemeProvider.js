@@ -2,113 +2,115 @@
  * ============================================================================
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/components/ThemeProvider.js
- * Objetivo: Gerenciar globalmente os modos de exibição da plataforma
- * ("theme-classic", "theme-dark" e "theme-synthwave") com suporte a
- * alternância cíclica de 1 clique e sincronização em tempo real com o
- * SettingsModal e localStorage ("platform_theme").
+ * Objetivo: Provedor global de temas visuais da plataforma com 4 modos na
+ * sequência oficial:
+ * 1. "theme-classic"   -> Claro (Modo Claro Institucional)
+ * 2. "theme-sepia"     -> Papel (Leitura Confortável / Sépia)
+ * 3. "theme-dark"      -> Escuro (Dark Mode)
+ * 4. "theme-synthwave" -> NEON / Synthwave
+ * Sincroniza automaticamente as classes no elemento <html>, o localStorage
+ * e expõe `cyclePlatformTheme()` para alternância em 1 clique no cabeçalho.
  * ============================================================================
  */
 
-'use client';
+"use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 
-// Ordem cíclica oficial dos temas da plataforma
-export const THEME_LIST = [
+export const PLATFORM_THEMES = [
   {
-    id: 'theme-classic',
-    label: 'Modo Claro',
-    shortLabel: 'Claro',
-    icon: '☀️',
+    id: "theme-classic",
+    shortKey: "classic",
+    label: "Claro",
+    fullName: "Clássico (MenteAfiada)",
+    icon: "☀️",
   },
   {
-    id: 'theme-dark',
-    label: 'Modo Escuro',
-    shortLabel: 'Escuro',
-    icon: '🌙',
+    id: "theme-sepia",
+    shortKey: "sepia",
+    label: "Papel",
+    fullName: "Papel / Leitura (Sépia)",
+    icon: "📜",
   },
   {
-    id: 'theme-synthwave',
-    label: 'Modo NEON',
-    shortLabel: 'NEON',
-    icon: '⚡',
+    id: "theme-dark",
+    shortKey: "dark",
+    label: "Escuro",
+    fullName: "Modo Escuro (Dark Mode)",
+    icon: "🌙",
+  },
+  {
+    id: "theme-synthwave",
+    shortKey: "synthwave",
+    label: "NEON",
+    fullName: "Neon / Synthwave",
+    icon: "⚡",
   },
 ];
 
+const ALL_THEME_CLASSES = PLATFORM_THEMES.map((t) => t.id);
+
+function normalizeThemeId(raw) {
+  if (!raw) return "theme-classic";
+  const val = String(raw).trim();
+  if (ALL_THEME_CLASSES.includes(val)) return val;
+  const byShort = PLATFORM_THEMES.find((t) => t.shortKey === val);
+  return byShort ? byShort.id : "theme-classic";
+}
+
 const ThemeContext = createContext({
-  theme: 'theme-classic',
-  themeInfo: THEME_LIST[0],
+  theme: "theme-classic",
+  themeInfo: PLATFORM_THEMES[0],
   setPlatformTheme: () => {},
   cyclePlatformTheme: () => {},
+  availableThemes: PLATFORM_THEMES,
 });
 
-export default function ThemeProvider({ children }) {
-  const [theme, setTheme] = useState('theme-classic');
+export function ThemeProvider({ children }) {
+  const [theme, setTheme] = useState("theme-classic");
 
-  // Aplica a classe no <html> e sincroniza o estado React
-  const syncThemeFromStorage = useCallback(() => {
-    const savedTheme = localStorage.getItem('platform_theme') || 'theme-classic';
-    const validTheme = THEME_LIST.some((t) => t.id === savedTheme)
-      ? savedTheme
-      : 'theme-classic';
+  const applyThemeToDom = useCallback((targetThemeId) => {
+    const normalized = normalizeThemeId(targetThemeId);
+    setTheme(normalized);
 
-    const html = document.documentElement;
-    html.classList.remove('theme-classic', 'theme-dark', 'theme-synthwave');
-    html.classList.add(validTheme);
+    if (typeof window !== "undefined") {
+      const root = document.documentElement;
+      root.classList.remove(...ALL_THEME_CLASSES);
+      root.classList.add(normalized);
 
-    setTheme(validTheme);
+      const shortKey = normalized.replace("theme-", "");
+      root.setAttribute("data-theme", shortKey);
+      window.localStorage.setItem("app_theme", shortKey);
+      window.localStorage.setItem("menteafiada_theme", normalized);
+    }
   }, []);
 
   useEffect(() => {
-    // Aplica o tema na montagem inicial
-    syncThemeFromStorage();
+    if (typeof window === "undefined") return;
+    const saved =
+      window.localStorage.getItem("menteafiada_theme") ||
+      window.localStorage.getItem("app_theme") ||
+      "theme-classic";
+    applyThemeToDom(saved);
+  }, [applyThemeToDom]);
 
-    // Escuta o evento customizado enviado pelo SettingsModal ou pelo botão global
-    window.addEventListener('theme-change', syncThemeFromStorage);
-    // Escuta alterações feitas em outras abas do navegador
-    window.addEventListener('storage', syncThemeFromStorage);
-
-    return () => {
-      window.removeEventListener('theme-change', syncThemeFromStorage);
-      window.removeEventListener('storage', syncThemeFromStorage);
-    };
-  }, [syncThemeFromStorage]);
-
-  // Define um tema específico e notifica toda a plataforma (incluindo SettingsModal)
-  const setPlatformTheme = useCallback((newThemeId) => {
-    const validTheme = THEME_LIST.some((t) => t.id === newThemeId)
-      ? newThemeId
-      : 'theme-classic';
-
-    localStorage.setItem('platform_theme', validTheme);
-
-    const html = document.documentElement;
-    html.classList.remove('theme-classic', 'theme-dark', 'theme-synthwave');
-    html.classList.add(validTheme);
-
-    setTheme(validTheme);
-
-    // Dispara o evento padrão já utilizado pelo SettingsModal
-    window.dispatchEvent(new Event('theme-change'));
-  }, []);
-
-  // Alterna ciclicamente com 1 clique: Claro -> Escuro -> NEON -> Claro
   const cyclePlatformTheme = useCallback(() => {
-    const currentIndex = THEME_LIST.findIndex((t) => t.id === theme);
-    const nextIndex = (currentIndex + 1) % THEME_LIST.length;
-    setPlatformTheme(THEME_LIST[nextIndex].id);
-  }, [theme, setPlatformTheme]);
+    const currentIndex = PLATFORM_THEMES.findIndex((t) => t.id === theme);
+    const nextIndex = (currentIndex + 1) % PLATFORM_THEMES.length;
+    applyThemeToDom(PLATFORM_THEMES[nextIndex].id);
+  }, [theme, applyThemeToDom]);
 
   const themeInfo =
-    THEME_LIST.find((t) => t.id === theme) || THEME_LIST[0];
+    PLATFORM_THEMES.find((t) => t.id === theme) || PLATFORM_THEMES[0];
 
   return (
     <ThemeContext.Provider
       value={{
         theme,
         themeInfo,
-        setPlatformTheme,
+        setPlatformTheme: applyThemeToDom,
         cyclePlatformTheme,
+        availableThemes: PLATFORM_THEMES,
       }}
     >
       {children}
@@ -116,7 +118,8 @@ export default function ThemeProvider({ children }) {
   );
 }
 
-// Hook utilitário para qualquer página ou componente acessar ou alternar o tema
 export function useTheme() {
   return useContext(ThemeContext);
 }
+
+export default ThemeProvider;

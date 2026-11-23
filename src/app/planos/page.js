@@ -3,23 +3,20 @@
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/planos/page.js
  * Objetivo: Página visual e interativa de Planos, Assinaturas e Perfis
- * Exclusivos da plataforma, integrada ao ThemeProvider global ("theme-classic",
- * "theme-dark", "theme-synthwave") e ao sistema de autenticação Clerk:
- * - Alternador dinâmico de ciclo de cobrança (Mensal vs. Anual com 20% OFF);
- * - Cards detalhados por perfil: Explorador (Grátis), Aluno Pro, Educador Pro
- *   e Institucional / Escola;
- * - Modal interativo de pré-checkout (PIX / Cartão) e compra avulsa de
- *   videoaulas e e-books;
- * - Matriz comparativa completa de recursos e perguntas frequentes (FAQ).
+ * Exclusivos conectada dinamicamente à tabela `subscription_plans` do
+ * Supabase (sincronizada em tempo real com o Painel do Proprietário),
+ * integrada ao ThemeProvider global ("theme-classic", "theme-dark",
+ * "theme-synthwave") e ao Clerk Auth.
  * ============================================================================
  */
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
+import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/app/components/ThemeProvider";
 
 const PLANS_THEMES = {
@@ -28,6 +25,8 @@ const PLANS_THEMES = {
     ambientGlow:
       "bg-[radial-gradient(ellipse_85%_60%_at_50%_-10%,rgba(99,102,241,0.13),transparent)]",
     badge: "bg-indigo-50 border-indigo-200 text-indigo-700",
+    promoBanner:
+      "bg-gradient-to-r from-indigo-600 via-purple-600 to-fuchsia-600 text-white shadow-lg shadow-indigo-500/20",
     toggleBox: "bg-white border-slate-200 shadow-sm",
     toggleInactive: "text-slate-600 hover:text-slate-900",
     card: "bg-white border-slate-200 shadow-xl shadow-slate-200/50 text-slate-900",
@@ -47,6 +46,8 @@ const PLANS_THEMES = {
     ambientGlow:
       "bg-[radial-gradient(ellipse_85%_60%_at_50%_-10%,rgba(139,92,246,0.18),transparent)]",
     badge: "bg-purple-500/15 border-purple-500/30 text-purple-300",
+    promoBanner:
+      "bg-gradient-to-r from-purple-700 via-indigo-700 to-fuchsia-700 text-white shadow-xl shadow-purple-950/50",
     toggleBox: "bg-slate-900 border-slate-800",
     toggleInactive: "text-slate-400 hover:text-white",
     card: "bg-slate-900/90 border-slate-800 shadow-xl shadow-slate-950/60 text-slate-100",
@@ -67,6 +68,8 @@ const PLANS_THEMES = {
       "bg-[radial-gradient(ellipse_90%_65%_at_50%_-10%,rgba(217,70,239,0.28),rgba(34,211,238,0.14),transparent)]",
     badge:
       "bg-cyan-500/15 border-cyan-400/50 text-cyan-300 shadow-[0_0_15px_rgba(34,211,238,0.25)]",
+    promoBanner:
+      "bg-gradient-to-r from-fuchsia-600 via-purple-700 to-cyan-600 text-white shadow-[0_0_30px_rgba(217,70,239,0.4)]",
     toggleBox:
       "bg-[#090d22] border-fuchsia-500/40 shadow-[0_0_20px_rgba(217,70,239,0.2)]",
     toggleInactive: "text-cyan-200/70 hover:text-cyan-100",
@@ -84,16 +87,17 @@ const PLANS_THEMES = {
   },
 };
 
-const PLANS_DATA = [
+const INITIAL_PLANS_DATA = [
   {
     id: "free",
     roleTag: "student_free / creator_free",
     icon: "🌱",
     name: "Explorador",
     audience: "Para alunos e professores conhecendo a plataforma",
+    regularMonthlyPrice: 0,
     monthlyPrice: 0,
     annualPrice: 0,
-    priceNote: "Gratuito para sempre",
+    priceNote: "Gratuito para sempre • Sem cartão",
     featured: false,
     ctaLabel: "Começar Gratuitamente",
     features: [
@@ -111,11 +115,12 @@ const PLANS_DATA = [
     icon: "🎓",
     name: "Aluno Pro",
     audience: "Para estudantes, concurseiros e autodidatas",
-    monthlyPrice: 24.9,
-    annualPrice: 19.9,
-    priceNote: "Acesso total a cursos e e-books",
+    regularMonthlyPrice: 24.9,
+    monthlyPrice: 9.9,
+    annualPrice: 7.4,
+    priceNote: "Oferta de lançamento • Acesso imediato",
     featured: false,
-    ctaLabel: "Assinar Aluno Pro",
+    ctaLabel: "Garantir Aluno Pro",
     features: [
       "Tudo do plano Explorador incluído",
       "Acesso ilimitado a todas as videoaulas e trilhas",
@@ -131,11 +136,12 @@ const PLANS_DATA = [
     icon: "🚀",
     name: "Educador Pro",
     audience: "Para professores, mentores e criadores de conteúdo",
-    monthlyPrice: 39.9,
-    annualPrice: 29.9,
-    priceNote: "Mais escolhido por educadores",
+    regularMonthlyPrice: 39.9,
+    monthlyPrice: 19.9,
+    annualPrice: 14.9,
+    priceNote: "Condição de fundador • Mais escolhido",
     featured: true,
-    badgeText: "MAIS POPULAR",
+    badgeText: "MAIS POPULAR • LANÇAMENTO",
     ctaLabel: "Assinar Educador Pro",
     features: [
       "Criação ilimitada de quizzes e avaliações interativas",
@@ -152,11 +158,12 @@ const PLANS_DATA = [
     icon: "🏫",
     name: "Institucional / Escola",
     audience: "Para escolas, cursinhos e treinamentos corporativos",
-    monthlyPrice: 149.0,
-    annualPrice: 119.0,
-    priceNote: "Pacote inicial com 5 licenças docentes",
+    regularMonthlyPrice: 149.0,
+    monthlyPrice: 79.9,
+    annualPrice: 59.9,
+    priceNote: "Pacote inicial com 5 licenças docentes inclusas",
     featured: false,
-    ctaLabel: "Solicitar Proposta / Ativar",
+    ctaLabel: "Ativar Plano Escola",
     features: [
       "Painel administrativo do Gestor (distribuição de licenças)",
       "5 contas Educador Pro incluídas (expansível sob demanda)",
@@ -240,12 +247,44 @@ export default function PlansPage() {
   const { theme } = useTheme();
   const styles = PLANS_THEMES[theme] || PLANS_THEMES["theme-classic"];
 
+  const [plans, setPlans] = useState(INITIAL_PLANS_DATA);
   const [billingCycle, setBillingCycle] = useState("annual"); // 'monthly' | 'annual'
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState("pix");
 
+  // Sincroniza automaticamente com os preços configurados no Painel do Proprietário (subscription_plans)
+  useEffect(() => {
+    async function loadDynamicPricing() {
+      const { data, error } = await supabase
+        .from("subscription_plans")
+        .select("*");
+
+      if (!error && data && data.length > 0) {
+        setPlans((prev) =>
+          prev.map((item) => {
+            const dbMatch = data.find((d) => d.id === item.id);
+            if (!dbMatch) return item;
+            return {
+              ...item,
+              name: dbMatch.name || item.name,
+              regularMonthlyPrice: Number(
+                dbMatch.regular_monthly_price ?? item.regularMonthlyPrice
+              ),
+              monthlyPrice: Number(dbMatch.monthly_price ?? item.monthlyPrice),
+              annualPrice: Number(
+                dbMatch.annual_monthly_price ?? item.annualPrice
+              ),
+            };
+          })
+        );
+      }
+    }
+
+    loadDynamicPricing();
+  }, []);
+
   const formatBRL = (val) =>
-    val.toLocaleString("pt-BR", {
+    Number(val || 0).toLocaleString("pt-BR", {
       style: "currency",
       currency: "BRL",
     });
@@ -253,7 +292,7 @@ export default function PlansPage() {
   const handleSelectPlan = (plan) => {
     if (plan.id === "free") {
       if (isSignedIn) {
-        router.push("/dashboard/participant");
+        router.push("/dashboard/courses");
       } else {
         router.push("/sign-up");
       }
@@ -268,16 +307,30 @@ export default function PlansPage() {
     setSelectedPlan(plan);
   };
 
+  const studentProPlan = plans.find((p) => p.id === "student_pro");
+  const creatorProPlan = plans.find((p) => p.id === "creator_pro");
+  const institutionalPlan = plans.find((p) => p.id === "institutional");
+
   return (
     <div
       className={`min-h-[calc(100vh-70px)] relative font-sans transition-colors duration-300 pb-24 ${styles.mainBg}`}
     >
-      {/* Glow Ambiental */}
       <div
         className={`fixed inset-0 pointer-events-none transition-opacity duration-500 ${styles.ambientGlow}`}
       />
 
-      <div className="relative z-10 max-w-7xl mx-auto px-6 pt-10 space-y-14">
+      <div className="relative z-10 max-w-7xl mx-auto px-6 pt-8 space-y-12">
+        {/* Faixa Promocional de Lançamento */}
+        <div
+          className={`rounded-2xl px-5 py-3 text-center text-xs md:text-sm font-extrabold tracking-wide flex flex-wrap items-center justify-center gap-2 ${styles.promoBanner}`}
+        >
+          <span>🔥 CONDIÇÃO ESPECIAL DE LANÇAMENTO:</span>
+          <span className="font-normal opacity-95">
+            Valores promocionais exclusivos para os primeiros membros fundadores
+            garantirem acesso completo à plataforma!
+          </span>
+        </div>
+
         {/* Cabeçalho & Seletor Mensal / Anual */}
         <section className="text-center max-w-3xl mx-auto space-y-5">
           <div className="flex justify-center">
@@ -326,16 +379,16 @@ export default function PlansPage() {
               >
                 <span>Plano Anual</span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500 text-white">
-                  -20% OFF
+                  DESCONTO EXTRA
                 </span>
               </button>
             </div>
           </div>
         </section>
 
-        {/* Grid de 4 Planos */}
+        {/* Grid de 4 Planos Dinâmicos */}
         <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
-          {PLANS_DATA.map((plan) => {
+          {plans.map((plan) => {
             const activePrice =
               billingCycle === "annual" ? plan.annualPrice : plan.monthlyPrice;
 
@@ -347,7 +400,7 @@ export default function PlansPage() {
                 }`}
               >
                 {plan.featured && (
-                  <span className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-indigo-600 to-fuchsia-600 text-white text-[10px] font-black uppercase tracking-widest shadow-lg">
+                  <span className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-indigo-600 to-fuchsia-600 text-white text-[10px] font-black uppercase tracking-widest shadow-lg whitespace-nowrap">
                     {plan.badgeText}
                   </span>
                 )}
@@ -367,7 +420,7 @@ export default function PlansPage() {
                     </p>
                   </div>
 
-                  {/* Preço */}
+                  {/* Preço Sincronizado com o Banco */}
                   <div className={`p-4 rounded-2xl border ${styles.subBox}`}>
                     {activePrice === 0 ? (
                       <div className="flex items-baseline gap-1">
@@ -376,6 +429,16 @@ export default function PlansPage() {
                       </div>
                     ) : (
                       <div>
+                        {plan.regularMonthlyPrice > activePrice && (
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-xs line-through opacity-55">
+                              De {formatBRL(plan.regularMonthlyPrice)}
+                            </span>
+                            <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500">
+                              LANÇAMENTO
+                            </span>
+                          </div>
+                        )}
                         <div className="flex items-baseline gap-1">
                           <span className="text-3xl font-black">
                             {formatBRL(activePrice)}
@@ -389,12 +452,11 @@ export default function PlansPage() {
                         )}
                       </div>
                     )}
-                    <span className="text-[11px] opacity-70 block mt-1">
+                    <span className="text-[11px] opacity-75 font-medium block mt-1.5">
                       {plan.priceNote}
                     </span>
                   </div>
 
-                  {/* Lista de Benefícios */}
                   <ul className="space-y-2.5 text-xs">
                     {plan.features.map((feat, i) => (
                       <li key={i} className="flex items-start gap-2.5">
@@ -423,7 +485,7 @@ export default function PlansPage() {
           })}
         </section>
 
-        {/* Destaque de Compra Avulsa (Videoaulas & E-books) */}
+        {/* Destaque de Compra Avulsa */}
         <section
           className={`border rounded-3xl p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6 ${styles.card}`}
         >
@@ -433,7 +495,7 @@ export default function PlansPage() {
             </div>
             <div className="space-y-1">
               <span className="text-[10px] font-black uppercase tracking-widest text-amber-500">
-                MODALIDADE FLEXÍVEL • SEM MENSALIDADE
+                MODALIDADE FLEXÍVEL • PAGAMENTO ÚNICO VIA PIX OU CARTÃO
               </span>
               <h3 className="text-lg md:text-xl font-black">
                 Prefere adquirir apenas um Curso ou E-book específico?
@@ -441,14 +503,14 @@ export default function PlansPage() {
               <p className="text-xs md:text-sm opacity-75 max-w-2xl">
                 Você pode manter sua conta gratuita e desbloquear cursos
                 completos, apostilas em PDF ou pacotes de simulados com{" "}
-                <strong>pagamento único via PIX ou Cartão</strong>, liberando o
-                acesso direto na sua área &ldquo;Meus Cursos&rdquo;.
+                <strong>pagamento único</strong>, liberando o acesso direto na
+                sua área &ldquo;Meus Cursos & Materiais&rdquo;.
               </p>
             </div>
           </div>
 
           <Link
-            href="/dashboard/participant"
+            href="/dashboard/courses"
             className={`px-6 py-3.5 rounded-2xl text-xs font-extrabold whitespace-nowrap transition ${styles.btnPrimary}`}
           >
             Explorar Catálogo de Cursos →
@@ -456,13 +518,16 @@ export default function PlansPage() {
         </section>
 
         {/* Tabela Comparativa Detalhada */}
-        <section className={`border rounded-3xl p-6 md:p-8 space-y-6 ${styles.card}`}>
+        <section
+          className={`border rounded-3xl p-6 md:p-8 space-y-6 ${styles.card}`}
+        >
           <div>
             <h2 className="text-xl md:text-2xl font-black">
               Comparativo Completo de Recursos por Perfil
             </h2>
             <p className="text-xs opacity-70 mt-1">
-              Veja em detalhes o que cada perfil desbloqueia na plataforma.
+              Valores e benefícios sincronizados em tempo real com a tabela
+              oficial da plataforma.
             </p>
           </div>
 
@@ -474,11 +539,24 @@ export default function PlansPage() {
                 >
                   <th className="py-3.5 px-4">Funcionalidade / Recurso</th>
                   <th className="py-3.5 px-4 text-center">Explorador</th>
-                  <th className="py-3.5 px-4 text-center">Aluno Pro</th>
+                  <th className="py-3.5 px-4 text-center">
+                    Aluno Pro
+                    <span className="block text-[10px] font-normal opacity-75">
+                      {formatBRL(studentProPlan?.monthlyPrice)}/mês
+                    </span>
+                  </th>
                   <th className="py-3.5 px-4 text-center text-indigo-500">
                     Educador Pro
+                    <span className="block text-[10px] font-normal opacity-80">
+                      {formatBRL(creatorProPlan?.monthlyPrice)}/mês
+                    </span>
                   </th>
-                  <th className="py-3.5 px-4 text-center">Institucional</th>
+                  <th className="py-3.5 px-4 text-center">
+                    Institucional
+                    <span className="block text-[10px] font-normal opacity-75">
+                      {formatBRL(institutionalPlan?.monthlyPrice)}/mês
+                    </span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -508,7 +586,7 @@ export default function PlansPage() {
         </section>
       </div>
 
-      {/* Modal de Pré-Checkout (Preparado para Integração PIX / Cartão) */}
+      {/* Modal de Pré-Checkout */}
       {selectedPlan && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div
@@ -517,7 +595,7 @@ export default function PlansPage() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <span className="text-[10px] font-black uppercase tracking-widest text-indigo-500">
-                  RESUMO DA ASSINATURA
+                  RESUMO DA ASSINATURA • LANÇAMENTO
                 </span>
                 <h3 className="text-xl font-black mt-0.5">
                   {selectedPlan.icon} {selectedPlan.name}
@@ -540,7 +618,7 @@ export default function PlansPage() {
               <div className="flex justify-between items-center text-xs">
                 <span>Ciclo selecionado:</span>
                 <strong className="uppercase">
-                  {billingCycle === "annual" ? "Anual (-20%)" : "Mensal"}
+                  {billingCycle === "annual" ? "Anual" : "Mensal"}
                 </strong>
               </div>
               <div className="flex justify-between items-center text-xs">
@@ -550,7 +628,7 @@ export default function PlansPage() {
                 </span>
               </div>
               <div className="flex justify-between items-center text-base font-black pt-2 border-t border-inherit mt-2">
-                <span>Total:</span>
+                <span>Total Vigente:</span>
                 <span>
                   {formatBRL(
                     billingCycle === "annual"
@@ -564,7 +642,6 @@ export default function PlansPage() {
               </div>
             </div>
 
-            {/* Escolha da Forma de Pagamento */}
             <div className="space-y-2">
               <label className="text-xs font-extrabold block">
                 Forma de Pagamento:
@@ -597,11 +674,10 @@ export default function PlansPage() {
             </div>
 
             <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-600 dark:text-amber-300 leading-relaxed">
-              <strong>Modo de Pré-Lançamento:</strong> A vitrine de planos está
-              ativa. Assim que você conectar sua chave do{" "}
-              <strong>Mercado Pago</strong>, <strong>Asaas</strong> ou{" "}
-              <strong>Stripe</strong>, este botão gerará a cobrança real e
-              promoverá o perfil automaticamente via Webhook.
+              <strong>Modo de Pré-Lançamento:</strong> Valores carregados
+              diretamente do banco de dados. Assim que você conectar sua chave
+              do <strong>Mercado Pago</strong>, <strong>Asaas</strong> ou{" "}
+              <strong>Stripe</strong>, este botão gerará a cobrança real.
             </div>
 
             <div className="flex gap-2.5">

@@ -2,19 +2,22 @@
  * ============================================================================
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/game/play/page.js
- * Objetivo: Interface interativa do aluno com correção de validação de resposta
- * e gravação garantida em player_answers e game_players:
+ * Objetivo: Interface interativa do aluno com correção de validação de resposta,
+ * gravação garantida em player_answers e game_players e blindagem completa
+ * anti-duplicação ao sair e reentrar na mesma sala/arena:
  * 1. Múltipla Escolha (com normalização numérica de correct_option);
  * 2. Completar Lacunas ("___") com palavras sugeridas em sequência;
  * 3. Ordenação Sequencial / Procedimental;
  * 4. Verdadeiro ou Falso Relâmpago;
- * 5. Nuvem de Palavras e Termômetro de Compreensão ao vivo.
+ * 5. Nuvem de Palavras e Termômetro de Compreensão ao vivo;
+ * 6. Trava de unicidade por (session_id, player_id, question_index) impedindo
+ *    acúmulo repetido de pontos ao sair e voltar na mesma questão.
  * ============================================================================
  */
 
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser } from "@clerk/nextjs";
@@ -120,6 +123,8 @@ function GamePlayContent() {
   const [questions, setQuestions] = useState([]);
   const [selectedOption, setSelectedOption] = useState(null);
   const [hasAnswered, setHasAnswered] = useState(false);
+  const [alreadyLockedOnRejoin, setAlreadyLockedOnRejoin] = useState(false);
+  const [checkingExistingAnswer, setCheckingExistingAnswer] = useState(false);
   const [scoreGained, setScoreGained] = useState(0);
   const [streak, setStreak] = useState(0);
   const [streakBonus, setStreakBonus] = useState(0);
@@ -238,6 +243,57 @@ function GamePlayContent() {
     return qData || [];
   };
 
+  // Verifica no banco de dados se o jogador já respondeu à questão atual (ao entrar ou mudar de questão)
+  const checkIfQuestionAlreadyAnswered = useCallback(
+    async (sessionId, playerId, questionIdx) => {
+      if (!sessionId || !playerId) return false;
+      setCheckingExistingAnswer(true);
+
+      try {
+        const { data: existingAns } = await supabase
+          .from("player_answers")
+          .select("id, selected_option, is_correct")
+          .eq("session_id", sessionId)
+          .eq("player_id", playerId)
+          .eq("question_index", Number(questionIdx))
+          .maybeSingle();
+
+        if (existingAns) {
+          setHasAnswered(true);
+          setAlreadyLockedOnRejoin(true);
+          setSelectedOption(existingAns.selected_option);
+          setScoreGained(0);
+          return true;
+        } else {
+          setAlreadyLockedOnRejoin(false);
+          return false;
+        }
+      } catch {
+        return false;
+      } finally {
+        setCheckingExistingAnswer(false);
+      }
+    },
+    []
+  );
+
+  // Verifica sempre que a questão mudar ou quando o jogador entrar na sessão
+  useEffect(() => {
+    if (session?.id && player?.id && session?.status === "EM_ANDAMENTO") {
+      checkIfQuestionAlreadyAnswered(
+        session.id,
+        player.id,
+        Number(session.current_question_index || 0)
+      );
+    }
+  }, [
+    session?.id,
+    session?.status,
+    session?.current_question_index,
+    player?.id,
+    checkIfQuestionAlreadyAnswered,
+  ]);
+
   const handleJoinSession = async (e) => {
     e.preventDefault();
     if (!pin.trim() || !playerName.trim()) {
@@ -285,26 +341,89 @@ function GamePlayContent() {
       ]);
     }
 
-    const { data: playerData, error: playerError } = await supabase
-      .from("game_players")
-      .insert({
-        session_id: sessionData.id,
-        player_name: playerName.trim(),
-        clerk_id: user?.id || null,
-      })
-      .select()
-      .single();
+    // BLINDAGEM ANTI-DUPLICAÇÃO DE JOGADOR:
+    // Reaproveita o jogador já cadastrado nesta sessão (via clerk_id, localStorage ou mesmo apelido)
+    let activePlayer = null;
 
-    if (playerError) {
-      setErrorMsg(t("join_error") || "Erro ao entrar na sala. Tente novamente.");
-      setLoading(false);
-      return;
+    if (user?.id) {
+      const { data: byClerk } = await supabase
+        .from("game_players")
+        .select("*")
+        .eq("session_id", sessionData.id)
+        .eq("clerk_id", user.id)
+        .maybeSingle();
+
+      if (byClerk) activePlayer = byClerk;
     }
 
-    setPlayer(playerData);
+    if (!activePlayer && typeof window !== "undefined") {
+      const savedPlayerId = window.localStorage.getItem(
+        `menteafiada_session_player_${sessionData.id}`
+      );
+      if (savedPlayerId) {
+        const { data: bySavedId } = await supabase
+          .from("game_players")
+          .select("*")
+          .eq("id", savedPlayerId)
+          .eq("session_id", sessionData.id)
+          .maybeSingle();
+
+        if (bySavedId) activePlayer = bySavedId;
+      }
+    }
+
+    if (!activePlayer) {
+      const { data: byName } = await supabase
+        .from("game_players")
+        .select("*")
+        .eq("session_id", sessionData.id)
+        .ilike("player_name", playerName.trim())
+        .limit(1)
+        .maybeSingle();
+
+      if (byName) activePlayer = byName;
+    }
+
+    if (!activePlayer) {
+      const { data: playerData, error: playerError } = await supabase
+        .from("game_players")
+        .insert({
+          session_id: sessionData.id,
+          player_name: playerName.trim(),
+          clerk_id: user?.id || null,
+        })
+        .select()
+        .single();
+
+      if (playerError) {
+        setErrorMsg(
+          t("join_error") || "Erro ao entrar na sala. Tente novamente."
+        );
+        setLoading(false);
+        return;
+      }
+      activePlayer = playerData;
+    }
+
+    if (typeof window !== "undefined" && activePlayer?.id) {
+      window.localStorage.setItem(
+        `menteafiada_session_player_${sessionData.id}`,
+        activePlayer.id
+      );
+    }
+
+    setPlayer(activePlayer);
+
+    // Verifica imediatamente se a questão atual já foi respondida antes da reconexão
+    await checkIfQuestionAlreadyAnswered(
+      sessionData.id,
+      activePlayer.id,
+      Number(sessionData.current_question_index || 0)
+    );
+
     setLoading(false);
 
-    subscribeToSession(sessionData.id, playerData.id);
+    subscribeToSession(sessionData.id, activePlayer.id);
   };
 
   const subscribeToSession = (sessionId, currentPlayerId) => {
@@ -350,6 +469,7 @@ function GamePlayContent() {
                 prevSession.quiz_id !== updatedSession.quiz_id)
             ) {
               setHasAnswered(false);
+              setAlreadyLockedOnRejoin(false);
               setSelectedOption(null);
               setScoreGained(0);
             }
@@ -439,9 +559,8 @@ function GamePlayContent() {
 
   /**
    * Gravação unificada e resiliente de resposta no Supabase:
-   * - Calcula pontuação e bônus de velocidade
-   * - Persiste o registro em `player_answers` (para o rendimento em tempo real do Host)
-   * - Atualiza `game_players` com o novo score acumulado
+   * - Verifica antes se já existe resposta registrada para (session_id, player_id, question_index)
+   * - Insere em `player_answers` e só soma pontos em `game_players` se a inserção for inédita
    */
   const processAnswerSubmission = async (isCorrect, selectedIndexForDb = 0) => {
     const questionIndex = Number(session.current_question_index || 0);
@@ -450,36 +569,23 @@ function GamePlayContent() {
     const speedBonus = safeTimeLeft * 25;
     const totalGained = isCorrect ? basePoints + speedBonus : 0;
 
-    setScoreGained(totalGained);
+    try {
+      // 1. Verifica no banco se esta questão já foi respondida por este jogador nesta sessão
+      const { data: duplicateCheck } = await supabase
+        .from("player_answers")
+        .select("id")
+        .eq("session_id", session.id)
+        .eq("player_id", player.id)
+        .eq("question_index", questionIndex)
+        .maybeSingle();
 
-    if (isCorrect) {
-      const newStreak = streak + 1;
-      setStreak(newStreak);
-
-      let bonus = 0;
-      if (newStreak === 2) bonus = 100;
-      else if (newStreak === 3) bonus = 200;
-      else if (newStreak >= 4) bonus = 300;
-      setStreakBonus(bonus);
-
-      if (newStreak >= 2) {
-        sounds.playStreak();
-      } else {
-        sounds.playCorrect();
+      if (duplicateCheck) {
+        setAlreadyLockedOnRejoin(true);
+        setScoreGained(0);
+        return;
       }
 
-      setPlayer((prev) => ({
-        ...prev,
-        score: (prev?.score || 0) + totalGained,
-      }));
-    } else {
-      setStreak(0);
-      setStreakBonus(0);
-      sounds.playWrong();
-    }
-
-    try {
-      // 1. Grava explicitamente em player_answers para o Host contabilizar Acertos/Erros ao vivo
+      // 2. Grava explicitamente em player_answers (protegido também pela constraint UNIQUE)
       const { error: ansError } = await supabase.from("player_answers").insert({
         session_id: session.id,
         player_id: player.id,
@@ -490,25 +596,68 @@ function GamePlayContent() {
       });
 
       if (ansError) {
+        // Código 23505 = violação de unicidade (tentativa repetida bloqueada pelo banco)
+        if (ansError.code === "23505") {
+          setAlreadyLockedOnRejoin(true);
+          setScoreGained(0);
+          return;
+        }
         console.warn(
           "[MenteAfiada] Aviso ao gravar em player_answers:",
           ansError.message
         );
       }
 
-      // 2. Atualiza pontuação do jogador na sala
-      if (totalGained > 0) {
-        const { error: scoreError } = await supabase
-          .from("game_players")
-          .update({ score: (player?.score || 0) + totalGained })
-          .eq("id", player.id);
+      // 3. Só aplica feedback visual e soma pontos se a resposta foi realmente inédita
+      setScoreGained(totalGained);
 
-        if (scoreError) {
-          console.warn(
-            "[MenteAfiada] Aviso ao atualizar pontuação:",
-            scoreError.message
-          );
+      if (isCorrect) {
+        const newStreak = streak + 1;
+        setStreak(newStreak);
+
+        let bonus = 0;
+        if (newStreak === 2) bonus = 100;
+        else if (newStreak === 3) bonus = 200;
+        else if (newStreak >= 4) bonus = 300;
+        setStreakBonus(bonus);
+
+        if (newStreak >= 2) {
+          sounds.playStreak();
+        } else {
+          sounds.playCorrect();
         }
+
+        const { data: freshPlayer } = await supabase
+          .from("game_players")
+          .select("score")
+          .eq("id", player.id)
+          .single();
+
+        const currentDbScore = Number(freshPlayer?.score ?? player?.score ?? 0);
+        const updatedScore = currentDbScore + totalGained;
+
+        setPlayer((prev) => ({
+          ...prev,
+          score: updatedScore,
+        }));
+
+        if (totalGained > 0) {
+          const { error: scoreError } = await supabase
+            .from("game_players")
+            .update({ score: updatedScore })
+            .eq("id", player.id);
+
+          if (scoreError) {
+            console.warn(
+              "[MenteAfiada] Aviso ao atualizar pontuação:",
+              scoreError.message
+            );
+          }
+        }
+      } else {
+        setStreak(0);
+        setStreakBonus(0);
+        sounds.playWrong();
       }
     } catch (err) {
       console.error("[MenteAfiada] Falha ao sincronizar resposta:", err);
@@ -517,7 +666,12 @@ function GamePlayContent() {
 
   // 1. Submissão para Múltipla Escolha (conversão numérica garantida)
   const handleSelectOption = async (optionIdx) => {
-    if (hasAnswered || session?.time_state !== "RODANDO") return;
+    if (
+      hasAnswered ||
+      checkingExistingAnswer ||
+      session?.time_state !== "RODANDO"
+    )
+      return;
 
     sounds.playClick();
     const cleanOptionIdx = Number(optionIdx);
@@ -537,7 +691,12 @@ function GamePlayContent() {
 
   // 2. Submissão para Verdadeiro ou Falso Relâmpago
   const handleSelectTrueFalse = async (choiceIdx) => {
-    if (hasAnswered || session?.time_state !== "RODANDO") return;
+    if (
+      hasAnswered ||
+      checkingExistingAnswer ||
+      session?.time_state !== "RODANDO"
+    )
+      return;
 
     sounds.playClick();
     const cleanChoice = Number(choiceIdx);
@@ -556,7 +715,12 @@ function GamePlayContent() {
 
   // 3. Submissão para Completar Lacunas
   const handleSubmitFillBlanks = async (selectedSequence) => {
-    if (hasAnswered || session?.time_state !== "RODANDO") return;
+    if (
+      hasAnswered ||
+      checkingExistingAnswer ||
+      session?.time_state !== "RODANDO"
+    )
+      return;
 
     sounds.playClick();
     setHasAnswered(true);
@@ -575,7 +739,12 @@ function GamePlayContent() {
 
   // 4. Submissão para Ordenação Sequencial
   const handleSubmitSequenceOrder = async (submittedOrder) => {
-    if (hasAnswered || session?.time_state !== "RODANDO") return;
+    if (
+      hasAnswered ||
+      checkingExistingAnswer ||
+      session?.time_state !== "RODANDO"
+    )
+      return;
 
     sounds.playClick();
     setHasAnswered(true);
@@ -791,7 +960,11 @@ function GamePlayContent() {
                   <FillBlanksPlayer
                     questionText={currentQuestion.question_text}
                     bankWords={currentOptionsData?.bank || []}
-                    disabled={hasAnswered || session.time_state !== "RODANDO"}
+                    disabled={
+                      hasAnswered ||
+                      checkingExistingAnswer ||
+                      session.time_state !== "RODANDO"
+                    }
                     onSubmitSequence={handleSubmitFillBlanks}
                   />
                 )}
@@ -800,7 +973,11 @@ function GamePlayContent() {
                   <SequenceOrderingPlayer
                     questionText={currentQuestion.question_text}
                     items={currentOptionsData?.correctOrder || []}
-                    disabled={hasAnswered || session.time_state !== "RODANDO"}
+                    disabled={
+                      hasAnswered ||
+                      checkingExistingAnswer ||
+                      session.time_state !== "RODANDO"
+                    }
                     onSubmitOrder={handleSubmitSequenceOrder}
                   />
                 )}
@@ -814,11 +991,15 @@ function GamePlayContent() {
                       <button
                         type="button"
                         disabled={
-                          hasAnswered || session.time_state !== "RODANDO"
+                          hasAnswered ||
+                          checkingExistingAnswer ||
+                          session.time_state !== "RODANDO"
                         }
                         onClick={() => handleSelectTrueFalse(0)}
                         className={`p-6 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-base shadow-lg transition-all flex flex-col items-center gap-2 cursor-pointer ${
-                          hasAnswered || session.time_state !== "RODANDO"
+                          hasAnswered ||
+                          checkingExistingAnswer ||
+                          session.time_state !== "RODANDO"
                             ? "opacity-60 cursor-not-allowed"
                             : "active:scale-95"
                         } ${
@@ -832,11 +1013,15 @@ function GamePlayContent() {
                       <button
                         type="button"
                         disabled={
-                          hasAnswered || session.time_state !== "RODANDO"
+                          hasAnswered ||
+                          checkingExistingAnswer ||
+                          session.time_state !== "RODANDO"
                         }
                         onClick={() => handleSelectTrueFalse(1)}
                         className={`p-6 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-base shadow-lg transition-all flex flex-col items-center gap-2 cursor-pointer ${
-                          hasAnswered || session.time_state !== "RODANDO"
+                          hasAnswered ||
+                          checkingExistingAnswer ||
+                          session.time_state !== "RODANDO"
                             ? "opacity-60 cursor-not-allowed"
                             : "active:scale-95"
                         } ${
@@ -871,13 +1056,17 @@ function GamePlayContent() {
                             key={i}
                             type="button"
                             disabled={
-                              hasAnswered || session.time_state !== "RODANDO"
+                              hasAnswered ||
+                              checkingExistingAnswer ||
+                              session.time_state !== "RODANDO"
                             }
                             onClick={() => handleSelectOption(i)}
                             className={`w-full p-4 font-bold rounded-2xl text-left text-sm transition-all flex items-center justify-between cursor-pointer text-white shadow-md ${
                               colors[i % 4]
                             } ${
-                              hasAnswered || session.time_state !== "RODANDO"
+                              hasAnswered ||
+                              checkingExistingAnswer ||
+                              session.time_state !== "RODANDO"
                                 ? "opacity-60 cursor-not-allowed"
                                 : "active:scale-95"
                             } ${isSelected ? "ring-4 ring-white scale-[1.02]" : ""}`}
@@ -897,25 +1086,39 @@ function GamePlayContent() {
                   <div
                     className={`p-4 rounded-2xl border text-center space-y-1 animate-in zoom-in-95 duration-200 shadow-sm ${styles.subBox}`}
                   >
-                    <p className="text-emerald-500 font-bold text-sm">
-                      {t("answer_registered") || "Resposta Registada!"}
-                    </p>
-                    {scoreGained > 0 ? (
-                      <div>
-                        <p className="text-xs text-amber-500 font-semibold">
-                          🎉 {t("correct") || "Correto!"} +{scoreGained} pts
+                    {alreadyLockedOnRejoin ? (
+                      <>
+                        <p className="text-amber-500 font-bold text-sm">
+                          🔒 Resposta já registrada para esta questão!
                         </p>
-                        {streakBonus > 0 && (
-                          <p className="text-[11px] text-amber-500 font-bold mt-1 animate-bounce">
-                            🔥 {t("streak_bonus") || "Bónus de Streak"} (+
-                            {streakBonus} pts)!
+                        <p className="text-xs opacity-75">
+                          Sua pontuação anterior foi preservada. Aguarde a
+                          próxima pergunta.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-emerald-500 font-bold text-sm">
+                          {t("answer_registered") || "Resposta Registada!"}
+                        </p>
+                        {scoreGained > 0 ? (
+                          <div>
+                            <p className="text-xs text-amber-500 font-semibold">
+                              🎉 {t("correct") || "Correto!"} +{scoreGained} pts
+                            </p>
+                            {streakBonus > 0 && (
+                              <p className="text-[11px] text-amber-500 font-bold mt-1 animate-bounce">
+                                🔥 {t("streak_bonus") || "Bónus de Streak"} (+
+                                {streakBonus} pts)!
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-rose-500 font-semibold">
+                            ❌ {t("incorrect") || "Incorreto! Streak resetado."}
                           </p>
                         )}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-rose-500 font-semibold">
-                        ❌ {t("incorrect") || "Incorreto! Streak resetado."}
-                      </p>
+                      </>
                     )}
                   </div>
                 )}

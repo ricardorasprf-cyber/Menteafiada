@@ -1,50 +1,45 @@
 @import "tailwindcss";
 
-:root {
+:root,
+html.theme-classic {
   --background: #f8fafc;
   --foreground: #0f172a;
   --card-bg: #ffffff;
   --card-border: #e2e8f0;
+  --accent-primary: #4f46e5;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card-bg: var(--card-bg);
-  --color-card-border: var(--card-border);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-/* 1. TEMA MODO CLARO (Branco MenteAfiada) */
-html.theme-classic, html:not([class*="theme-"]) {
-  --background: #f8fafc;
-  --foreground: #0f172a;    /* Texto principal em azul escuro/preto */
-  --card-bg: #ffffff;       /* Cartões em branco puro */
-  --card-border: #cbd5e1;   /* Bordas visíveis */
-}
-
-/* 2. TEMA MODO ESCURO (Dark Mode Preto) */
 html.theme-dark {
-  --background: #020617;
-  --foreground: #f8fafc;
+  --background: #070b19;
+  --foreground: #f1f5f9;
   --card-bg: #0f172a;
   --card-border: #1e293b;
+  --accent-primary: #8b5cf6;
 }
 
-/* 3. TEMA SYNTHWAVE / NEON (Roxo Vibrante) */
 html.theme-synthwave {
-  --background: #1a0933;
-  --foreground: #f472b6;
-  --card-bg: #2d1254;
-  --card-border: #5b21b6;
+  --background: #03040c;
+  --foreground: #ecfeff;
+  --card-bg: #090d22;
+  --card-border: rgba(217, 70, 239, 0.35);
+  --accent-primary: #d946ef;
 }
 
-/* APLICAÇÃO GLOBAL DAS CORES */
-html, body {
+/* 4º Tema Global: Papel / Leitura Confortável (Sépia) */
+html.theme-sepia {
+  --background: #f7f3e8;
+  --foreground: #292524;
+  --card-bg: #fffdf8;
+  --card-border: #e6dec8;
+  --accent-primary: #b45309;
+}
+
+/* Aplicação Global das Cores */
+html,
+body {
   background-color: var(--background) !important;
   color: var(--foreground) !important;
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
-  transition: background-color 0.3s ease, color 0.3s ease;
+  transition: background-color 0.25s ease, color 0.25s ease;
   min-height: 100vh;
 }
