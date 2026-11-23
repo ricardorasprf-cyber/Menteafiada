@@ -41,26 +41,19 @@ export default function RootLayout({ children }) {
   // Ativa o proxy oficial `/__clerk` quando rodando em produção no subdomínio .vercel.app
   const clerkProxyUrl =
     isProductionClerk && process.env.NODE_ENV === "production"
-      ? "https://menteafiada.vercel.app/__clerk"
+      ? "[https://menteafiada.vercel.app/__clerk](https://menteafiada.vercel.app/__clerk)"
       : undefined;
 
   return (
-    <ClerkProvider
-      localization={ptBR}
-      proxyUrl={clerkProxyUrl}
-      signInUrl="/sign-in"
-      signUpUrl="/sign-up"
-      signInFallbackRedirectUrl="/dashboard/courses"
-      signUpFallbackRedirectUrl="/completar-perfil"
-    >
+    <ClerkProvider localization="{ptBR}" proxyUrl="{clerkProxyUrl}" signInFallbackRedirectUrl="/dashboard/courses" signInUrl="/sign-in" signUpFallbackRedirectUrl="/completar-perfil" signUpUrl="/sign-up">
       <html lang="pt-BR" className="theme-classic" suppressHydrationWarning>
         <body
           className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}
         >
           <ThemeProvider>
             <LanguageProvider>
-              <VisitTracker />
-              <PlatformHeader />
+              <VisitTracker/>
+              <PlatformHeader/>
               <div className="flex-1 flex flex-col">{children}</div>
             </LanguageProvider>
           </ThemeProvider>
@@ -69,5 +62,3 @@ export default function RootLayout({ children }) {
     </ClerkProvider>
   );
 }
-
-```
