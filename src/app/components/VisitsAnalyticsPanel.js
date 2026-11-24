@@ -51,6 +51,7 @@ export function VisitsAnalyticsPanel() {
   const styles = PANEL_STYLES[theme] || PANEL_STYLES["theme-classic"];
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [metrics, setMetrics] = useState({
     totalVisits: 0,
@@ -63,14 +64,19 @@ export function VisitsAnalyticsPanel() {
 
   const loadVisits = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const res = await fetch("/api/analytics/visits", { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.metrics) setMetrics(data.metrics);
-        if (Array.isArray(data.users)) setUsersList(data.users);
+      if (res.status === 403) {
+        setLoadError("Acesso negado. Apenas proprietários e administradores podem consultar as visitações.");
+        return;
       }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.metrics) setMetrics(data.metrics);
+      if (Array.isArray(data.users)) setUsersList(data.users);
     } catch (err) {
+      setLoadError("Não foi possível carregar as visitações. Tente atualizar os contadores.");
       console.error("[VisitsAnalyticsPanel] Erro ao consultar visitações:", err);
     } finally {
       setLoading(false);
@@ -78,7 +84,13 @@ export function VisitsAnalyticsPanel() {
   }, []);
 
   useEffect(() => {
-    loadVisits();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) loadVisits();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [loadVisits]);
 
   const handleExportCSV = () => {
@@ -158,12 +170,20 @@ export function VisitsAnalyticsPanel() {
         <button
           type="button"
           onClick={loadVisits}
+          disabled={loading}
           className={`px-4 py-2 rounded-xl border text-xs font-extrabold transition cursor-pointer self-start md:self-auto ${styles.refreshBtn}`}
         >
           🔄 Atualizar Contadores
         </button>
       </div>
 
+      {loadError && (
+        <p role="alert" className={`rounded-xl border p-4 text-sm font-semibold ${styles.subBox}`}>
+          {loadError}
+        </p>
+      )}
+
+      <div className={loadError ? "hidden" : "space-y-6"}>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className={`p-4 rounded-2xl border space-y-1 ${styles.subBox}`}>
           <span className="text-[10px] font-black uppercase tracking-wider opacity-60 block">
@@ -298,6 +318,7 @@ export function VisitsAnalyticsPanel() {
           </table>
         </div>
       )}
+      </div>
     </section>
   );
 }
