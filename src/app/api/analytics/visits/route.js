@@ -89,9 +89,12 @@ export async function POST(req) {
 export async function GET() {
   try {
     const { userId, sessionClaims } = await auth();
-    const requesterRole =
-      sessionClaims?.metadata?.role ||
-      sessionClaims?.publicMetadata?.role;
+    const sessionRole = sessionClaims?.metadata?.role || sessionClaims?.publicMetadata?.role;
+    let requesterRole = sessionRole;
+    if (userId && !sessionRole) {
+      const user = await currentUser();
+      if (user?.id === userId) requesterRole = user.publicMetadata?.role;
+    }
 
     if (!userId || (requesterRole !== "owner" && requesterRole !== "admin")) {
       return NextResponse.json(
