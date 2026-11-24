@@ -57,3 +57,6 @@ base_02_apis_lib.md
 base_03_infra_sql.md
 base_04_dashboards_jogo.md
 temp_base.md
+/base_0[5-9]_*.md
+/base_foco_*.md
+/recuperacao-menteafiada-*.zip

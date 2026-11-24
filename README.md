@@ -34,6 +34,26 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Revisão e recuperação
+
+Consulte [AGENTS.md](AGENTS.md) e [CONTEXTO_PROJETO.md](CONTEXTO_PROJETO.md) ao retomar o projeto. Faça mudanças em branch e revise `git diff --cached --name-only` antes de cada commit. Para entregar, abra um PR com o escopo e as evidências de validação quando houver autorização para enviar a branch ao remoto. O script legado `npm run push` adiciona todos os arquivos e envia a `main` diretamente.
+
+O workflow localmente preparado em `.github/workflows/validate.yml` instala as dependências do lockfile e executa o ESLint em PRs destinados a `main`. Antes de tornar o check obrigatório no GitHub, verifique a primeira execução remota e trate a linha de base do lint. Build e E2E da aplicação entram no CI depois que houver configuração de QA validada.
+
+Para recuperar código, inspecione o commit de salvaguarda em outra branch ou reverta o commit que causou a regressão. Preserve alterações locais antes de trocar de branch. Mudanças de esquema e credenciais têm procedimentos próprios de recuperação.
+
+## Ambientes e dados
+
+| Ambiente | Aplicação | Serviços e dados |
+| --- | --- | --- |
+| Desenvolvimento | Next.js local com configuração de desenvolvimento | Clerk e Supabase de desenvolvimento. Use dados fictícios e mantenha os valores locais fora do Git. |
+| QA local | `npm run test:e2e:serve` em `127.0.0.1:4317` | Instância de desenvolvimento do Clerk dedicada à suíte e projeto Supabase descartável. Use `.env.e2e.local` e contas sintéticas. |
+| Homologação remota, se necessária | Preview isolado e autorizado | Use credenciais separadas de produção. Valide destinos de webhooks, rotinas agendadas e variáveis antes de habilitar tráfego. |
+| Produção | Implantação publicada separadamente | Credenciais e dados exclusivos de produção. |
+
+O provisionamento de QA depende de uma definição revisável do esquema, incluindo funções, permissões e políticas RLS. Ainda não há migrações versionadas que permitam reconstruí-lo. Obtenha uma fonte de esquema aprovada, revise-a e prepare migrações e seed sintético antes de executar a suíte. Antes de habilitar os fluxos autenticados, comprove com duas contas de QA o isolamento entre usuários e o acesso legítimo por papel. Para recuperar QA, revogue as credenciais afetadas e recrie o projeto descartável por migrações e seed. Mantenha proteção de rede compatível com os destinos permitidos.
+
 ## Testes de interface com Microsoft Edge
 
 O Playwright usa o canal `msedge` do Edge instalado no Windows. Execute
