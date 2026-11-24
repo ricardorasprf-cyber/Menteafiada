@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/lib/supabase";
 
 // Lista base de termos ofensivos a ofuscar (expansível conforme a moderação pedagógica)
@@ -14,6 +15,7 @@ const PROFANITY_LIST = [
 const URL_REGEX = /(https?:\/\/[^\s]+)|(www\.[^\s]+)|([a-zA-Z0-9_-]+\.(com|org|net|edu|gov|io|gg|me|xyz|app))/gi;
 
 export default function ArenaChat({ sessionId, playerName, userClerkId }) {
+  const { t } = useLanguage();
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const [isOpen, setIsOpen] = useState(false);
@@ -94,7 +96,7 @@ export default function ArenaChat({ sessionId, playerName, userClerkId }) {
     const now = Date.now();
     // Trava de Rate Limiting: 1,5 segundos entre envios para evitar flood
     if (now - lastSentTime < 1500) {
-      setFloodWarning("Aguarde um momento antes de enviar outra mensagem.");
+      setFloodWarning("chat_rate_limit");
       return;
     }
 
@@ -134,7 +136,7 @@ export default function ArenaChat({ sessionId, playerName, userClerkId }) {
           className="relative flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-2xl shadow-xl shadow-purple-900/30 font-bold text-xs transition-all hover:scale-105 cursor-pointer"
         >
           <span>💬</span>
-          <span>Chat da Sala</span>
+          <span>{t("chat_room")}</span>
           {unreadCount > 0 && (
             <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full border-2 border-slate-900 animate-pulse">
               {unreadCount}
@@ -152,8 +154,8 @@ export default function ArenaChat({ sessionId, playerName, userClerkId }) {
             <div className="flex items-center gap-2">
               <span className="text-base">💬</span>
               <div>
-                <h4 className="font-bold text-xs">Chat da Partida</h4>
-                <p className="text-[10px] text-slate-400">Moderação ativa & ambiente seguro</p>
+                <h4 className="font-bold text-xs">{t("chat_match")}</h4>
+                <p className="text-[10px] text-slate-400">{t("chat_moderation")}</p>
               </div>
             </div>
             <button
@@ -169,8 +171,8 @@ export default function ArenaChat({ sessionId, playerName, userClerkId }) {
             {messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center opacity-50 space-y-1">
                 <span className="text-2xl">🤝</span>
-                <p className="text-xs">Nenhuma mensagem ainda.</p>
-                <p className="text-[10px]">Deseje boa sorte aos outros jogadores!</p>
+                <p className="text-xs">{t("chat_empty")}</p>
+                <p className="text-[10px]">{t("chat_good_luck")}</p>
               </div>
             ) : (
               messages.map((msg) => (
@@ -179,7 +181,7 @@ export default function ArenaChat({ sessionId, playerName, userClerkId }) {
                   className={`flex flex-col ${msg.isSelf ? "items-end" : "items-start"}`}
                 >
                   <span className="text-[10px] opacity-60 mb-0.5 px-1">
-                    {msg.isSelf ? "Você" : msg.sender} • {msg.timestamp}
+                    {msg.isSelf ? t("owner_you") : msg.sender} • {msg.timestamp}
                   </span>
                   <div
                     className={`max-w-[85%] px-3.5 py-2 rounded-2xl text-xs font-medium break-words shadow-sm ${
@@ -199,7 +201,7 @@ export default function ArenaChat({ sessionId, playerName, userClerkId }) {
           {/* Alerta de Flood / Spam */}
           {floodWarning && (
             <div className="px-4 py-1.5 bg-rose-500/10 border-t border-rose-500/20 text-rose-500 text-[11px] font-bold text-center">
-              ⚠️ {floodWarning}
+              ⚠️ {t(floodWarning)}
             </div>
           )}
 
@@ -212,13 +214,14 @@ export default function ArenaChat({ sessionId, playerName, userClerkId }) {
               ref={inputRef}
               type="text"
               maxLength={160}
-              placeholder="Digite uma mensagem..."
+              placeholder={t("chat_input")}
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
               className="flex-1 bg-[var(--background)] border border-[var(--card-border)] text-[var(--foreground)] text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-purple-500"
             />
             <button
               type="submit"
+              aria-label={t("chat_send")}
               disabled={!newMessage.trim()}
               className="px-3.5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer"
             >

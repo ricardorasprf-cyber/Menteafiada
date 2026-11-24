@@ -12,13 +12,14 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/lib/supabase";
 
 const PULSE_OPTIONS = [
   {
     id: "understood",
     icon: "👍",
-    label: "Dominei o conteúdo!",
+    label: "pulse_understood",
     barColor: "bg-emerald-500",
     btnStyle:
       "border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-emerald-500",
@@ -26,7 +27,7 @@ const PULSE_OPTIONS = [
   {
     id: "partial",
     icon: "🤔",
-    label: "Tenho uma dúvida pontual",
+    label: "pulse_partial",
     barColor: "bg-amber-500",
     btnStyle:
       "border-amber-500/40 bg-amber-500/10 hover:bg-amber-500 hover:text-slate-950 text-amber-500",
@@ -34,7 +35,7 @@ const PULSE_OPTIONS = [
   {
     id: "review",
     icon: "🔄",
-    label: "Preciso que explique novamente",
+    label: "pulse_review",
     barColor: "bg-rose-500",
     btnStyle:
       "border-rose-500/40 bg-rose-500/10 hover:bg-rose-500 hover:text-white text-rose-500",
@@ -49,9 +50,9 @@ export function QuickPulseOverlay({
   onClose,
   onPulseUpdate,
 }) {
-  const [pulseQuestion, setPulseQuestion] = useState(
-    "Como está o entendimento da turma sobre este tópico?"
-  );
+  const { t, locale } = useLanguage();
+  const [pulseDraft, setPulseQuestion] = useState(null);
+  const pulseQuestion = pulseDraft ?? t("pulse_default");
   const [activeQuestion, setActiveQuestion] = useState(null);
   const [votesMap, setVotesMap] = useState({});
   const [myVote, setMyVote] = useState(null);
@@ -160,10 +161,10 @@ export function QuickPulseOverlay({
         <div className="flex items-start justify-between gap-4 border-b border-[var(--card-border)] pb-4">
           <div>
             <span className="text-[10px] font-black uppercase tracking-widest text-amber-500 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/30">
-              🌡️ TERMÔMETRO DA TURMA • TEMPO REAL
+              🌡️ {t("pulse_live")}
             </span>
             <h2 className="text-xl font-black mt-1.5">
-              {activeQuestion || "Checagem Rápida de Compreensão"}
+              {activeQuestion || t("pulse_start")}
             </h2>
           </div>
 
@@ -173,7 +174,7 @@ export function QuickPulseOverlay({
               onClick={activeQuestion ? handleStopPulse : onClose}
               className="px-3 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-500 border border-rose-500/30 text-xs font-bold cursor-pointer"
             >
-              {activeQuestion ? "Encerrar ✕" : "Fechar ✕"}
+              {t(activeQuestion ? "pulse_end" : "host_close")} ✕
             </button>
           )}
         </div>
@@ -182,7 +183,7 @@ export function QuickPulseOverlay({
           <form onSubmit={handleStartPulse} className="space-y-4">
             <div>
               <label className="text-xs font-bold opacity-80 block mb-1.5">
-                Pergunta de Checagem para os Alunos:
+                {t("pulse_prompt_label")}
               </label>
               <input
                 type="text"
@@ -197,7 +198,7 @@ export function QuickPulseOverlay({
               type="submit"
               className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold rounded-xl shadow-lg text-sm cursor-pointer transition"
             >
-              🌡️ Disparar Termômetro para a Turma
+              🌡️ {t("pulse_launch")}
             </button>
           </form>
         )}
@@ -217,9 +218,9 @@ export function QuickPulseOverlay({
                 >
                   <span className="flex items-center gap-3">
                     <span className="text-2xl">{opt.icon}</span>
-                    <span>{opt.label}</span>
+                    <span>{t(opt.label)}</span>
                   </span>
-                  {isSelected && <span className="text-xs">✓ Enviado</span>}
+                  {isSelected && <span className="text-xs">✓ {t("pulse_sent")}</span>}
                 </button>
               );
             })}
@@ -229,8 +230,8 @@ export function QuickPulseOverlay({
         {activeQuestion && (
           <div className="bg-[var(--background)] border border-[var(--card-border)] rounded-2xl p-5 space-y-4">
             <div className="flex justify-between items-center text-xs font-bold opacity-75">
-              <span>Resultado ao Vivo:</span>
-              <span>{totalResponses} resposta(s)</span>
+              <span>{t("pulse_results")}</span>
+              <span>{t("pulse_responses", { count: totalResponses.toLocaleString(locale) })}</span>
             </div>
 
             <div className="space-y-3">
@@ -238,7 +239,7 @@ export function QuickPulseOverlay({
                 <div key={item.id} className="space-y-1">
                   <div className="flex justify-between text-xs font-bold">
                     <span>
-                      {item.icon} {item.label}
+                      {item.icon} {t(item.label)}
                     </span>
                     <span className="font-mono">
                       {item.percent}% ({item.count})

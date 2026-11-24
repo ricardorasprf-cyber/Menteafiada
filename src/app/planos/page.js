@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/app/components/ThemeProvider";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const PLANS_THEMES = {
   "theme-classic": {
@@ -93,20 +94,20 @@ const INITIAL_PLANS_DATA = [
     roleTag: "student_free / creator_free",
     icon: "🌱",
     name: "Explorador",
-    audience: "Para alunos e professores conhecendo a plataforma",
+    audience: "plans_free_audience",
     regularMonthlyPrice: 0,
     monthlyPrice: 0,
     annualPrice: 0,
-    priceNote: "Gratuito para sempre • Sem cartão",
+    priceNote: "plans_free_note",
     featured: false,
-    ctaLabel: "Começar Gratuitamente",
+    ctaLabel: "plans_free_cta",
     features: [
-      "Entrada ilimitada em salas ao vivo via PIN ou QR Code",
-      "Participação nas rodadas públicas da Arena Oficial",
-      "Criação de até 3 quizzes próprios",
-      "Salas ao vivo com até 25 participantes simultâneos",
-      "Acesso ao 1º módulo demonstrativo dos cursos",
-      "Acesso a e-books e materiais gratuitos de degustação",
+      "plans_feature_join",
+      "plans_feature_arena",
+      "plans_feature_own_quizzes",
+      "plans_feature_25",
+      "plans_feature_intro",
+      "plans_feature_samples",
     ],
   },
   {
@@ -114,20 +115,20 @@ const INITIAL_PLANS_DATA = [
     roleTag: "student_pro",
     icon: "🎓",
     name: "Aluno Pro",
-    audience: "Para estudantes, concurseiros e autodidatas",
+    audience: "plans_student_audience",
     regularMonthlyPrice: 24.9,
     monthlyPrice: 9.9,
     annualPrice: 7.4,
-    priceNote: "Oferta de lançamento • Acesso imediato",
+    priceNote: "plans_student_note",
     featured: false,
-    ctaLabel: "Garantir Aluno Pro",
+    ctaLabel: "plans_student_cta",
     features: [
-      "Tudo do plano Explorador incluído",
-      "Acesso ilimitado a todas as videoaulas e trilhas",
-      "Download ilimitado de e-books, apostilas e mapas mentais",
-      "Banco completo de simulados comentados e revisão",
-      "Emissão de certificados digitais verificáveis",
-      "Selo VIP e estatísticas avançadas no ranking da Arena",
+      "plans_feature_all_free",
+      "plans_feature_videos",
+      "plans_feature_downloads",
+      "plans_feature_practice",
+      "plans_feature_certificates",
+      "plans_feature_vip",
     ],
   },
   {
@@ -135,21 +136,21 @@ const INITIAL_PLANS_DATA = [
     roleTag: "creator_pro",
     icon: "🚀",
     name: "Educador Pro",
-    audience: "Para professores, mentores e criadores de conteúdo",
+    audience: "plans_creator_audience",
     regularMonthlyPrice: 39.9,
     monthlyPrice: 19.9,
     annualPrice: 14.9,
-    priceNote: "Condição de fundador • Mais escolhido",
+    priceNote: "plans_creator_note",
     featured: true,
-    badgeText: "MAIS POPULAR • LANÇAMENTO",
-    ctaLabel: "Assinar Educador Pro",
+    badgeText: "plans_popular",
+    ctaLabel: "plans_creator_cta",
     features: [
-      "Criação ilimitada de quizzes e avaliações interativas",
-      "Salas ao vivo para até 300 participantes simultâneos",
-      "Gerador automático de questões com IA (Gemini)",
-      "Exportação completa de notas e relatórios (CSV / PDF)",
-      "Publicação de suas próprias videoaulas e e-books",
-      "Personalização visual da sala de jogo",
+      "plans_feature_unlimited_quiz",
+      "plans_feature_300",
+      "plans_feature_ai",
+      "plans_feature_reports",
+      "plans_feature_publish",
+      "plans_feature_room_style",
     ],
   },
   {
@@ -157,87 +158,87 @@ const INITIAL_PLANS_DATA = [
     roleTag: "manager + creator_pro",
     icon: "🏫",
     name: "Institucional / Escola",
-    audience: "Para escolas, cursinhos e treinamentos corporativos",
+    audience: "plans_school_audience",
     regularMonthlyPrice: 149.0,
     monthlyPrice: 79.9,
     annualPrice: 59.9,
-    priceNote: "Pacote inicial com 5 licenças docentes inclusas",
+    priceNote: "plans_school_note",
     featured: false,
-    ctaLabel: "Ativar Plano Escola",
+    ctaLabel: "plans_school_cta",
     features: [
-      "Painel administrativo do Gestor (distribuição de licenças)",
-      "5 contas Educador Pro incluídas (expansível sob demanda)",
-      "Salas de grande porte para até 1.000 participantes",
-      "Trilhas de videoaulas e PDFs fechadas para seus alunos",
-      "Relatórios gerenciais consolidados por turma e docente",
-      "Suporte prioritário na implantação pedagógica",
+      "plans_feature_manager",
+      "plans_feature_licenses",
+      "plans_feature_1000",
+      "plans_feature_private_content",
+      "plans_feature_class_reports",
+      "plans_feature_support",
     ],
   },
 ];
 
 const COMPARISON_MATRIX = [
   {
-    feature: "Participação em salas ao vivo via PIN / QR Code",
-    free: "Ilimitado",
-    student: "Ilimitado",
-    creator: "Ilimitado",
-    school: "Ilimitado",
+    feature: "plans_matrix_join",
+    free: "shared_unlimited",
+    student: "shared_unlimited",
+    creator: "shared_unlimited",
+    school: "shared_unlimited",
   },
   {
-    feature: "Batalhas Oficiais da Arena (14h, 16h, 18h, 20h)",
-    free: "Incluído",
-    student: "Incluído + Selo VIP",
-    creator: "Incluído + Selo Pro",
-    school: "Incluído + Torneios Privados",
+    feature: "plans_matrix_arena",
+    free: "plans_included",
+    student: "plans_vip",
+    creator: "plans_pro_badge",
+    school: "plans_tournaments",
   },
   {
-    feature: "Biblioteca de Videoaulas e Trilhas Gravadas",
-    free: "1º módulo grátis",
-    student: "Acesso Total",
-    creator: "Acesso + Publicação",
-    school: "Acesso + Trilhas Próprias",
+    feature: "plans_matrix_videos",
+    free: "plans_first_module",
+    student: "plans_full_access",
+    creator: "plans_with_publish",
+    school: "plans_with_own_courses",
   },
   {
-    feature: "Download de E-books, Apostilas e Mapas Mentais",
-    free: "Amostras grátis",
-    student: "Ilimitado (PDF)",
-    creator: "Ilimitado + Publicação",
-    school: "Ilimitado Institucional",
+    feature: "plans_matrix_downloads",
+    free: "plans_samples",
+    student: "plans_unlimited_pdf",
+    creator: "plans_unlimited_publish",
+    school: "plans_unlimited_school",
   },
   {
-    feature: "Certificados Digitais Verificáveis",
+    feature: "plans_matrix_certificates",
     free: "—",
-    student: "Incluído",
-    creator: "Incluído",
-    school: "Personalizado com Logo",
+    student: "plans_included",
+    creator: "plans_included",
+    school: "plans_custom_logo",
   },
   {
-    feature: "Quizzes Criados pelo Usuário",
-    free: "Até 3 quizzes",
-    student: "Até 5 quizzes",
-    creator: "Ilimitado",
-    school: "Ilimitado",
+    feature: "plans_matrix_quizzes",
+    free: "plans_up_to_3",
+    student: "plans_up_to_5",
+    creator: "shared_unlimited",
+    school: "shared_unlimited",
   },
   {
-    feature: "Limite de Alunos por Sala Ao Vivo",
-    free: "Até 25 alunos",
-    student: "Até 25 alunos",
-    creator: "Até 300 alunos",
-    school: "Até 1.000 alunos",
+    feature: "plans_matrix_limit",
+    free: "plans_up_to_25",
+    student: "plans_up_to_25",
+    creator: "plans_up_to_300",
+    school: "plans_up_to_1000",
   },
   {
-    feature: "Gerador de Questões com IA (Gemini)",
+    feature: "plans_matrix_ai",
     free: "—",
     student: "—",
-    creator: "Ilimitado",
-    school: "Ilimitado",
+    creator: "shared_unlimited",
+    school: "shared_unlimited",
   },
   {
-    feature: "Exportação de Relatórios e Notas (CSV / PDF)",
-    free: "Visualização na tela",
-    student: "Boletim pessoal",
-    creator: "Exportação Completa",
-    school: "Auditoria Multi-turmas",
+    feature: "plans_matrix_reports",
+    free: "plans_on_screen",
+    student: "plans_personal_report",
+    creator: "plans_full_export",
+    school: "plans_audit",
   },
 ];
 
@@ -245,6 +246,7 @@ export default function PlansPage() {
   const router = useRouter();
   const { isSignedIn, user } = useUser();
   const { theme } = useTheme();
+  const { t, locale } = useLanguage();
   const styles = PLANS_THEMES[theme] || PLANS_THEMES["theme-classic"];
 
   const [plans, setPlans] = useState(INITIAL_PLANS_DATA);
@@ -284,10 +286,19 @@ export default function PlansPage() {
   }, []);
 
   const formatBRL = (val) =>
-    Number(val || 0).toLocaleString("pt-BR", {
+    Number(val || 0).toLocaleString(locale, {
       style: "currency",
       currency: "BRL",
     });
+
+  const displayPlanName = (plan) => {
+    const original = INITIAL_PLANS_DATA.find((entry) => entry.id === plan.id);
+    if (original?.name !== plan.name) return plan.name;
+    return t({
+      free: "owner_explorer", student_pro: "role_student_pro",
+      creator_pro: "role_educator_pro", institutional: "plans_school_name",
+    }[plan.id]);
+  };
 
   const handleSelectPlan = (plan) => {
     if (plan.id === "free") {
@@ -324,10 +335,9 @@ export default function PlansPage() {
         <div
           className={`rounded-2xl px-5 py-3 text-center text-xs md:text-sm font-extrabold tracking-wide flex flex-wrap items-center justify-center gap-2 ${styles.promoBanner}`}
         >
-          <span>🔥 CONDIÇÃO ESPECIAL DE LANÇAMENTO:</span>
+          <span>🔥 {t("plans_promo")}</span>
           <span className="font-normal opacity-95">
-            Valores promocionais exclusivos para os primeiros membros fundadores
-            garantirem acesso completo à plataforma!
+            {t("plans_promo_desc")}
           </span>
         </div>
 
@@ -337,18 +347,16 @@ export default function PlansPage() {
             <span
               className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full border text-xs font-black uppercase tracking-widest ${styles.badge}`}
             >
-              <span>💎</span> PLANOS & PERFIS EXCLUSIVOS
+              <span>💎</span> {t("plans_badge")}
             </span>
           </div>
 
           <h1 className="text-3xl md:text-5xl font-black tracking-tight leading-tight">
-            Potencialize seu aprendizado e suas aulas no MenteAfiada
+            {t("plans_title")}
           </h1>
 
           <p className="text-sm md:text-base opacity-75 leading-relaxed">
-            Comece gratuitamente nas salas ao vivo ou desbloqueie acesso
-            completo a videoaulas, e-books exclusivos, geração de quizzes com
-            IA e relatórios avançados.
+            {t("plans_intro")}
           </p>
 
           {/* Alternador Mensal / Anual */}
@@ -365,7 +373,7 @@ export default function PlansPage() {
                     : styles.toggleInactive
                 }`}
               >
-                Cobrança Mensal
+                {t("plans_monthly")}
               </button>
 
               <button
@@ -377,9 +385,9 @@ export default function PlansPage() {
                     : styles.toggleInactive
                 }`}
               >
-                <span>Plano Anual</span>
+                <span>{t("plans_annual")}</span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500 text-white">
-                  DESCONTO EXTRA
+                  {t("plans_discount")}
                 </span>
               </button>
             </div>
@@ -401,7 +409,7 @@ export default function PlansPage() {
               >
                 {plan.featured && (
                   <span className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-indigo-600 to-fuchsia-600 text-white text-[10px] font-black uppercase tracking-widest shadow-lg whitespace-nowrap">
-                    {plan.badgeText}
+                    {t(plan.badgeText)}
                   </span>
                 )}
 
@@ -414,9 +422,9 @@ export default function PlansPage() {
                   </div>
 
                   <div>
-                    <h2 className="text-xl font-black">{plan.name}</h2>
+                    <h2 className="text-xl font-black">{displayPlanName(plan)}</h2>
                     <p className="text-xs opacity-70 mt-1 leading-relaxed">
-                      {plan.audience}
+                      {t(plan.audience)}
                     </p>
                   </div>
 
@@ -424,18 +432,18 @@ export default function PlansPage() {
                   <div className={`p-4 rounded-2xl border ${styles.subBox}`}>
                     {activePrice === 0 ? (
                       <div className="flex items-baseline gap-1">
-                        <span className="text-3xl font-black">R$ 0</span>
-                        <span className="text-xs opacity-70">/ para sempre</span>
+                        <span className="text-3xl font-black">{formatBRL(0)}</span>
+                        <span className="text-xs opacity-70">{t("plans_forever")}</span>
                       </div>
                     ) : (
                       <div>
                         {plan.regularMonthlyPrice > activePrice && (
                           <div className="flex items-center gap-2 mb-0.5">
                             <span className="text-xs line-through opacity-55">
-                              De {formatBRL(plan.regularMonthlyPrice)}
+                              {t("plans_from")} {formatBRL(plan.regularMonthlyPrice)}
                             </span>
                             <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500">
-                              LANÇAMENTO
+                              {t("plans_launch")}
                             </span>
                           </div>
                         )}
@@ -443,17 +451,17 @@ export default function PlansPage() {
                           <span className="text-3xl font-black">
                             {formatBRL(activePrice)}
                           </span>
-                          <span className="text-xs opacity-70">/ mês</span>
+                          <span className="text-xs opacity-70">{t("plans_per_month")}</span>
                         </div>
                         {billingCycle === "annual" && (
                           <span className="text-[11px] text-emerald-500 font-bold block mt-0.5">
-                            Cobrado anualmente ({formatBRL(activePrice * 12)}/ano)
+                            {t("plans_annual_total", { amount: formatBRL(activePrice * 12) })}
                           </span>
                         )}
                       </div>
                     )}
                     <span className="text-[11px] opacity-75 font-medium block mt-1.5">
-                      {plan.priceNote}
+                      {t(plan.priceNote)}
                     </span>
                   </div>
 
@@ -463,7 +471,7 @@ export default function PlansPage() {
                         <span className="text-emerald-500 font-black mt-0.5">
                           ✓
                         </span>
-                        <span className="opacity-90 leading-snug">{feat}</span>
+                        <span className="opacity-90 leading-snug">{t(feat)}</span>
                       </li>
                     ))}
                   </ul>
@@ -477,7 +485,7 @@ export default function PlansPage() {
                       plan.featured ? styles.btnPrimary : styles.btnSecondary
                     }`}
                   >
-                    {plan.ctaLabel}
+                    {t(plan.ctaLabel)}
                   </button>
                 </div>
               </div>
@@ -495,16 +503,13 @@ export default function PlansPage() {
             </div>
             <div className="space-y-1">
               <span className="text-[10px] font-black uppercase tracking-widest text-amber-500">
-                MODALIDADE FLEXÍVEL • PAGAMENTO ÚNICO VIA PIX OU CARTÃO
+                {t("plans_one_time")}
               </span>
               <h3 className="text-lg md:text-xl font-black">
-                Prefere adquirir apenas um Curso ou E-book específico?
+                {t("plans_single_title")}
               </h3>
               <p className="text-xs md:text-sm opacity-75 max-w-2xl">
-                Você pode manter sua conta gratuita e desbloquear cursos
-                completos, apostilas em PDF ou pacotes de simulados com{" "}
-                <strong>pagamento único</strong>, liberando o acesso direto na
-                sua área &ldquo;Meus Cursos & Materiais&rdquo;.
+                {t("plans_single_desc")}
               </p>
             </div>
           </div>
@@ -513,7 +518,7 @@ export default function PlansPage() {
             href="/dashboard/courses"
             className={`px-6 py-3.5 rounded-2xl text-xs font-extrabold whitespace-nowrap transition ${styles.btnPrimary}`}
           >
-            Explorar Catálogo de Cursos →
+            {t("plans_explore")}
           </Link>
         </section>
 
@@ -523,11 +528,10 @@ export default function PlansPage() {
         >
           <div>
             <h2 className="text-xl md:text-2xl font-black">
-              Comparativo Completo de Recursos por Perfil
+              {t("plans_comparison")}
             </h2>
             <p className="text-xs opacity-70 mt-1">
-              Valores e benefícios sincronizados em tempo real com a tabela
-              oficial da plataforma.
+              {t("plans_comparison_desc")}
             </p>
           </div>
 
@@ -537,24 +541,24 @@ export default function PlansPage() {
                 <tr
                   className={`border-b text-[11px] uppercase font-extrabold tracking-wider ${styles.tableHeader}`}
                 >
-                  <th className="py-3.5 px-4">Funcionalidade / Recurso</th>
-                  <th className="py-3.5 px-4 text-center">Explorador</th>
+                  <th className="py-3.5 px-4">{t("plans_feature")}</th>
+                  <th className="py-3.5 px-4 text-center">{t("owner_explorer")}</th>
                   <th className="py-3.5 px-4 text-center">
-                    Aluno Pro
+                    {t("role_student_pro")}
                     <span className="block text-[10px] font-normal opacity-75">
-                      {formatBRL(studentProPlan?.monthlyPrice)}/mês
+                      {formatBRL(studentProPlan?.monthlyPrice)}{t("plans_per_month")}
                     </span>
                   </th>
                   <th className="py-3.5 px-4 text-center text-indigo-500">
-                    Educador Pro
+                    {t("role_educator_pro")}
                     <span className="block text-[10px] font-normal opacity-80">
-                      {formatBRL(creatorProPlan?.monthlyPrice)}/mês
+                      {formatBRL(creatorProPlan?.monthlyPrice)}{t("plans_per_month")}
                     </span>
                   </th>
                   <th className="py-3.5 px-4 text-center">
-                    Institucional
+                    {t("owner_institutional")}
                     <span className="block text-[10px] font-normal opacity-75">
-                      {formatBRL(institutionalPlan?.monthlyPrice)}/mês
+                      {formatBRL(institutionalPlan?.monthlyPrice)}{t("plans_per_month")}
                     </span>
                   </th>
                 </tr>
@@ -565,18 +569,18 @@ export default function PlansPage() {
                     key={idx}
                     className={`border-b transition ${styles.tableRow}`}
                   >
-                    <td className="py-3.5 px-4 font-bold">{row.feature}</td>
+                    <td className="py-3.5 px-4 font-bold">{t(row.feature)}</td>
                     <td className="py-3.5 px-4 text-center opacity-75">
-                      {row.free}
+                      {t(row.free)}
                     </td>
                     <td className="py-3.5 px-4 text-center font-semibold">
-                      {row.student}
+                      {t(row.student)}
                     </td>
                     <td className="py-3.5 px-4 text-center font-extrabold text-indigo-500">
-                      {row.creator}
+                      {t(row.creator)}
                     </td>
                     <td className="py-3.5 px-4 text-center font-semibold">
-                      {row.school}
+                      {t(row.school)}
                     </td>
                   </tr>
                 ))}
@@ -595,13 +599,13 @@ export default function PlansPage() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <span className="text-[10px] font-black uppercase tracking-widest text-indigo-500">
-                  RESUMO DA ASSINATURA • LANÇAMENTO
+                  {t("plans_summary")}
                 </span>
                 <h3 className="text-xl font-black mt-0.5">
-                  {selectedPlan.icon} {selectedPlan.name}
+                  {selectedPlan.icon} {displayPlanName(selectedPlan)}
                 </h3>
                 <p className="text-xs opacity-70 mt-0.5">
-                  Conta: {user?.primaryEmailAddress?.emailAddress}
+                  {t("plans_account")} {user?.primaryEmailAddress?.emailAddress}
                 </p>
               </div>
 
@@ -616,19 +620,19 @@ export default function PlansPage() {
 
             <div className={`p-4 rounded-2xl border space-y-1 ${styles.subBox}`}>
               <div className="flex justify-between items-center text-xs">
-                <span>Ciclo selecionado:</span>
+                <span>{t("plans_cycle")}</span>
                 <strong className="uppercase">
-                  {billingCycle === "annual" ? "Anual" : "Mensal"}
+                  {t(billingCycle === "annual" ? "plans_annual" : "plans_monthly")}
                 </strong>
               </div>
               <div className="flex justify-between items-center text-xs">
-                <span>Perfil ativado automaticamente:</span>
+                <span>{t("plans_profile")}</span>
                 <span className="font-mono font-bold text-indigo-500">
                   {selectedPlan.roleTag}
                 </span>
               </div>
               <div className="flex justify-between items-center text-base font-black pt-2 border-t border-inherit mt-2">
-                <span>Total Vigente:</span>
+                <span>{t("plans_total")}</span>
                 <span>
                   {formatBRL(
                     billingCycle === "annual"
@@ -636,7 +640,7 @@ export default function PlansPage() {
                       : selectedPlan.monthlyPrice
                   )}
                   <span className="text-xs font-normal opacity-70">
-                    {billingCycle === "annual" ? " / ano" : " / mês"}
+                    {" "}{t(billingCycle === "annual" ? "plans_per_year" : "plans_per_month")}
                   </span>
                 </span>
               </div>
@@ -644,7 +648,7 @@ export default function PlansPage() {
 
             <div className="space-y-2">
               <label className="text-xs font-extrabold block">
-                Forma de Pagamento:
+                {t("plans_payment_method")}
               </label>
               <div className="grid grid-cols-2 gap-2.5">
                 <button
@@ -656,7 +660,7 @@ export default function PlansPage() {
                       : styles.subBox
                   }`}
                 >
-                  <span>💠</span> PIX Instantâneo
+                  <span>💠</span> {t("plans_pix")}
                 </button>
 
                 <button
@@ -668,16 +672,13 @@ export default function PlansPage() {
                       : styles.subBox
                   }`}
                 >
-                  <span>💳</span> Cartão de Crédito
+                  <span>💳</span> {t("plans_card")}
                 </button>
               </div>
             </div>
 
             <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-600 dark:text-amber-300 leading-relaxed">
-              <strong>Modo de Pré-Lançamento:</strong> Valores carregados
-              diretamente do banco de dados. Assim que você conectar sua chave
-              do <strong>Mercado Pago</strong>, <strong>Asaas</strong> ou{" "}
-              <strong>Stripe</strong>, este botão gerará a cobrança real.
+              {t("plans_demo")}
             </div>
 
             <div className="flex gap-2.5">
@@ -686,20 +687,21 @@ export default function PlansPage() {
                 onClick={() => setSelectedPlan(null)}
                 className={`flex-1 py-3 rounded-xl text-xs font-bold cursor-pointer ${styles.btnSecondary}`}
               >
-                Voltar
+                {t("plans_back")}
               </button>
 
               <button
                 type="button"
                 onClick={() => {
-                  alert(
-                    `Checkout preparado para o plano "${selectedPlan.name}" via ${paymentMethod.toUpperCase()}.\n\nPróximo passo: conectar as credenciais do gateway de pagamento (Mercado Pago, Asaas ou Stripe) para gerar o QR Code PIX / Link de Cartão.`
-                  );
+                  alert(t("plans_checkout_alert", {
+                    plan: displayPlanName(selectedPlan),
+                    method: t(paymentMethod === "pix" ? "plans_pix" : "plans_card"),
+                  }));
                   setSelectedPlan(null);
                 }}
                 className={`flex-1 py-3 rounded-xl text-xs font-extrabold cursor-pointer ${styles.btnPrimary}`}
               >
-                Continuar para Pagamento
+                {t("plans_payment_cta")}
               </button>
             </div>
           </div>

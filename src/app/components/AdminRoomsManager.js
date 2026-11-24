@@ -2,8 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { useLanguage } from "@/contexts/LanguageContext";
+
+const STATUS_KEYS = {
+  AGUARDANDO: "owner_room_waiting",
+  EM_ANDAMENTO: "owner_room_running",
+  FINALIZADO: "owner_room_finished",
+};
 
 export default function AdminRoomsManager() {
+  const { t, locale } = useLanguage();
+  const formatNumber = (value) => Number(value || 0).toLocaleString(locale);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("TODAS"); // TODAS | ATIVAS | LEGADO
@@ -46,10 +55,12 @@ export default function AdminRoomsManager() {
         });
 
       if (error) {
-        alert("Erro ao salvar configuração: " + error.message);
+        console.error("Erro ao salvar configuração:", error);
+        alert(t("owner_retention_error"));
       }
     } catch (err) {
       console.error("Erro ao salvar configuração:", err);
+      alert(t("owner_retention_error"));
     } finally {
       setSavingSettings(false);
     }
@@ -106,7 +117,7 @@ export default function AdminRoomsManager() {
 
   // Forçar encerramento imediato de sala ativa
   const handleForceCloseSession = async (sessionId) => {
-    if (!confirm("Deseja realmente forçar o encerramento imediato desta sala?")) return;
+    if (!confirm(t("owner_close_confirm"))) return;
 
     setActionLoadingId(sessionId);
     const { error } = await supabase
@@ -115,7 +126,8 @@ export default function AdminRoomsManager() {
       .eq("id", sessionId);
 
     if (error) {
-      alert("Erro ao encerrar sala: " + error.message);
+      console.error("Erro ao encerrar sala:", error);
+      alert(t("owner_close_error"));
     } else {
       setSessions((prev) =>
         prev.map((s) => (s.id === sessionId ? { ...s, status: "FINALIZADO" } : s))
@@ -126,7 +138,7 @@ export default function AdminRoomsManager() {
 
   // Excluir sala individualmente
   const handleDeleteSession = async (sessionId, pin) => {
-    if (!confirm(`Tem certeza que deseja apagar permanentemente a sala PIN ${pin}? Todos os dados atrelados serão removidos.`)) return;
+    if (!confirm(t("owner_delete_room_confirm", { pin }))) return;
 
     setActionLoadingId(sessionId);
     const { error } = await supabase
@@ -135,7 +147,8 @@ export default function AdminRoomsManager() {
       .eq("id", sessionId);
 
     if (error) {
-      alert("Erro ao excluir sala: " + error.message);
+      console.error("Erro ao excluir sala:", error);
+      alert(t("owner_delete_room_error"));
     } else {
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
     }
@@ -144,7 +157,7 @@ export default function AdminRoomsManager() {
 
   // Executar a rotina de exclusão manual pontual
   const handlePurgeLegacy = async () => {
-    const days = prompt("Expurgar salas finalizadas com mais de quantos dias?", autoPurgeDays.toString());
+    const days = prompt(t("owner_purge_prompt"), autoPurgeDays.toString());
     if (days === null) return;
 
     setPurging(true);
@@ -153,9 +166,10 @@ export default function AdminRoomsManager() {
     });
 
     if (error) {
-      alert("Erro ao executar limpeza: " + error.message);
+      console.error("Erro ao executar limpeza:", error);
+      alert(t("owner_purge_error"));
     } else {
-      alert(`Limpeza concluída! ${count || 0} salas legadas foram eliminadas.`);
+      alert(t("owner_purge_done", { count: formatNumber(count) }));
       fetchSessions();
     }
     setPurging(false);
@@ -175,13 +189,13 @@ export default function AdminRoomsManager() {
       {/* Barra de Ações & Estatísticas de Salas */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="p-4 bg-[var(--background)] border border-[var(--card-border)] rounded-2xl flex flex-col justify-center">
-          <span className="text-xs text-[var(--foreground)] opacity-70 font-semibold block">Salas Ativas (Em Aberto)</span>
-          <p className="text-2xl font-black text-emerald-500 font-mono mt-1">{activeCount}</p>
+          <span className="text-xs text-[var(--foreground)] opacity-70 font-semibold block">{t("owner_active_rooms")}</span>
+          <p className="text-2xl font-black text-emerald-500 font-mono mt-1">{formatNumber(activeCount)}</p>
         </div>
 
         <div className="p-4 bg-[var(--background)] border border-[var(--card-border)] rounded-2xl flex flex-col justify-center">
-          <span className="text-xs text-[var(--foreground)] opacity-70 font-semibold block">Salas em Legado (Finalizadas)</span>
-          <p className="text-2xl font-black text-amber-500 font-mono mt-1">{legacyCount}</p>
+          <span className="text-xs text-[var(--foreground)] opacity-70 font-semibold block">{t("owner_archived_rooms")}</span>
+          <p className="text-2xl font-black text-amber-500 font-mono mt-1">{formatNumber(legacyCount)}</p>
         </div>
 
         {/* Card de Configuração de Automação de Retenção */}
@@ -189,10 +203,10 @@ export default function AdminRoomsManager() {
           <div className="flex items-center justify-between">
             <div>
               <span className="text-xs text-rose-500 font-bold block flex items-center gap-1.5">
-                ⚙️ Automação de Retenção
+                ⚙️ {t("owner_retention")}
               </span>
               <span className="text-[11px] text-[var(--foreground)] opacity-60">
-                {savingSettings ? "Salvando alterações..." : "Expurgo automático de dados"}
+                {t(savingSettings ? "saving" : "owner_auto_purge")}
               </span>
             </div>
 
@@ -200,6 +214,7 @@ export default function AdminRoomsManager() {
             <label className="relative inline-flex items-center cursor-pointer">
               <input
                 type="checkbox"
+                aria-label={t("owner_auto_purge")}
                 checked={autoPurgeEnabled}
                 onChange={(e) => {
                   const val = e.target.checked;
@@ -214,9 +229,10 @@ export default function AdminRoomsManager() {
 
           <div className="flex items-center gap-2 pt-1">
             <span className="text-xs font-semibold text-[var(--foreground)] opacity-80 whitespace-nowrap">
-              Apagar após:
+              {t("owner_delete_after")}
             </span>
             <select
+              aria-label={t("owner_delete_after")}
               disabled={!autoPurgeEnabled}
               value={autoPurgeDays}
               onChange={(e) => {
@@ -226,21 +242,21 @@ export default function AdminRoomsManager() {
               }}
               className="bg-[var(--card-bg)] border border-[var(--card-border)] text-[var(--foreground)] text-xs font-bold rounded-lg px-2.5 py-1.5 focus:outline-none cursor-pointer disabled:opacity-40"
             >
-              <option value={1}>1 dia (24h)</option>
-              <option value={2}>2 dias</option>
-              <option value={3}>3 dias</option>
-              <option value={7}>7 dias (1 semana)</option>
-              <option value={15}>15 dias</option>
-              <option value={30}>30 dias (1 mês)</option>
+              <option value={1}>{t("owner_one_day")}</option>
+              <option value={2}>{t("owner_days", { count: formatNumber(2) })}</option>
+              <option value={3}>{t("owner_days", { count: formatNumber(3) })}</option>
+              <option value={7}>{t("owner_one_week")}</option>
+              <option value={15}>{t("owner_days", { count: formatNumber(15) })}</option>
+              <option value={30}>{t("owner_one_month")}</option>
             </select>
 
             <button
               onClick={handlePurgeLegacy}
               disabled={purging}
-              title="Executar expurgo manualmente agora"
+              title={t("owner_purge")}
               className="ml-auto py-1.5 px-3 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-[11px] rounded-lg shadow transition cursor-pointer disabled:opacity-50"
             >
-              {purging ? "Limpando..." : "🧹 Limpar Agora"}
+              {purging ? t("owner_purging") : `🧹 ${t("owner_purge")}`}
             </button>
           </div>
         </div>
@@ -259,9 +275,9 @@ export default function AdminRoomsManager() {
                   : "bg-[var(--background)] border-[var(--card-border)] text-[var(--foreground)] opacity-70 hover:opacity-100"
               }`}
             >
-              {opt === "TODAS" && `Todas (${sessions.length})`}
-              {opt === "ATIVAS" && `Ativas (${activeCount})`}
-              {opt === "LEGADO" && `Legado (${legacyCount})`}
+              {opt === "TODAS" && `${t("owner_rooms_all")} (${formatNumber(sessions.length)})`}
+              {opt === "ATIVAS" && `${t("owner_rooms_active")} (${formatNumber(activeCount)})`}
+              {opt === "LEGADO" && `${t("owner_rooms_legacy")} (${formatNumber(legacyCount)})`}
             </button>
           ))}
         </div>
@@ -270,7 +286,7 @@ export default function AdminRoomsManager() {
           onClick={fetchSessions}
           className="text-xs bg-[var(--background)] border border-[var(--card-border)] px-3 py-1.5 rounded-xl font-bold hover:opacity-80 transition cursor-pointer"
         >
-          🔄 Atualizar Lista
+          🔄 {t("owner_refresh_rooms")}
         </button>
       </div>
 
@@ -280,25 +296,25 @@ export default function AdminRoomsManager() {
           <thead>
             <tr className="border-b border-[var(--card-border)] text-[var(--foreground)] opacity-70 bg-slate-900/40">
               <th className="p-4 font-bold">PIN</th>
-              <th className="p-4 font-bold">Quiz</th>
-              <th className="p-4 font-bold">Status</th>
-              <th className="p-4 font-bold">Tipo</th>
-              <th className="p-4 font-bold">Jogadores</th>
-              <th className="p-4 font-bold">Criada em</th>
-              <th className="p-4 font-bold text-right">Ações de Gestão</th>
+              <th className="p-4 font-bold">{t("arena_quiz")}</th>
+              <th className="p-4 font-bold">{t("owner_status")}</th>
+              <th className="p-4 font-bold">{t("owner_type")}</th>
+              <th className="p-4 font-bold">{t("owner_players")}</th>
+              <th className="p-4 font-bold">{t("owner_created_at")}</th>
+              <th className="p-4 font-bold text-right">{t("owner_room_actions")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--card-border)] font-medium">
             {loading ? (
               <tr>
                 <td colSpan={7} className="text-center py-10 opacity-50">
-                  Carregando sessões...
+                  {t("owner_rooms_loading")}
                 </td>
               </tr>
             ) : filteredSessions.length === 0 ? (
               <tr>
                 <td colSpan={7} className="text-center py-10 opacity-50">
-                  Nenhuma sessão localizada neste filtro.
+                  {t("owner_rooms_empty")}
                 </td>
               </tr>
             ) : (
@@ -310,7 +326,7 @@ export default function AdminRoomsManager() {
                   <tr key={session.id} className="hover:bg-[var(--background)] transition">
                     <td className="p-4 font-mono font-bold text-amber-500">{session.pin}</td>
                     <td className="p-4 font-bold text-[var(--foreground)] max-w-xs truncate">
-                      {session.quizzes?.title || "Quiz Padrão"}
+                      {session.quizzes?.title || t("owner_default_quiz")}
                     </td>
                     <td className="p-4">
                       <span
@@ -322,21 +338,21 @@ export default function AdminRoomsManager() {
                             : "bg-slate-500/20 text-slate-400 border border-slate-500/30"
                         }`}
                       >
-                        {session.status}
+                        {STATUS_KEYS[session.status] ? t(STATUS_KEYS[session.status]) : session.status}
                       </span>
                     </td>
                     <td className="p-4">
                       {session.is_public ? (
                         <span className="text-[10px] text-purple-400 font-bold bg-purple-500/10 px-2 py-0.5 rounded-md border border-purple-500/20">
-                          ⚔️ Arena
+                          ⚔️ {t("arena_nav")}
                         </span>
                       ) : (
-                        <span className="text-[10px] text-slate-400 font-bold">🔒 Privada</span>
+                        <span className="text-[10px] text-slate-400 font-bold">🔒 {t("owner_private")}</span>
                       )}
                     </td>
-                    <td className="p-4 font-mono">{playersCount}</td>
+                    <td className="p-4 font-mono">{formatNumber(playersCount)}</td>
                     <td className="p-4 opacity-70">
-                      {new Date(session.created_at).toLocaleDateString("pt-BR", {
+                      {new Date(session.created_at).toLocaleString(locale, {
                         day: "2-digit",
                         month: "2-digit",
                         year: "numeric",
@@ -350,9 +366,9 @@ export default function AdminRoomsManager() {
                           onClick={() => handleForceCloseSession(session.id)}
                           disabled={actionLoadingId === session.id}
                           className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg text-[10px] transition cursor-pointer"
-                          title="Encerra a sala imediatamente"
+                          title={t("owner_close_room_now")}
                         >
-                          Encerrar
+                          {t("owner_close_room")}
                         </button>
                       )}
 
@@ -360,9 +376,9 @@ export default function AdminRoomsManager() {
                         onClick={() => handleDeleteSession(session.id, session.pin)}
                         disabled={actionLoadingId === session.id}
                         className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-[10px] transition cursor-pointer"
-                        title="Exclui definitivamente a sessão e registros atrelados"
+                        title={t("owner_delete_room_title")}
                       >
-                        Excluir
+                        {t("owner_delete")}
                       </button>
                     </td>
                   </tr>
