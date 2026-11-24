@@ -16,8 +16,18 @@ export const dynamic = "force-dynamic";
 // Janela de concentração antes de iniciar a 1ª pergunta: 5 minutos (300s)
 const PRE_START_WINDOW_SECONDS = 300;
 
-export async function GET() {
+export async function GET(req) {
   try {
+    const cronSecret = process.env.CRON_SECRET;
+    const authHeader = req.headers.get("authorization");
+
+    if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+      return NextResponse.json(
+        { error: "Acesso não autorizado." },
+        { status: 401 }
+      );
+    }
+
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseKey =
       process.env.SUPABASE_SERVICE_ROLE_KEY ||

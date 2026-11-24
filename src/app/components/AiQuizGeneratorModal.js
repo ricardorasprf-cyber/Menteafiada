@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { QUIZ_CATEGORIES } from "@/constants/categories";
 
-export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated }) {
+export default function AiQuizGeneratorModal({ isOpen, onClose, onSaveQuiz, maxQuestions = 10 }) {
   const { language } = useLanguage();
   const [topic, setTopic] = useState("");
   const [category, setCategory] = useState(QUIZ_CATEGORIES[0]?.id || "Concurso Público");
@@ -12,6 +12,7 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
   const [difficulty, setDifficulty] = useState("médio");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [draft, setDraft] = useState(null);
 
   if (!isOpen) return null;
 
@@ -32,7 +33,7 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
         body: JSON.stringify({
           topic,
           category,
-          count: Number(count),
+          amount: Number(count),
           difficulty,
           language: language || "pt",
         }),
@@ -44,16 +45,12 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
         throw new Error(data.error || "Falha ao gerar o quiz.");
       }
 
-      // Garante que o objeto gerado carregue a categoria selecionada
-      const quizWithCategory = {
-        ...data,
-        category: data.category || category,
-      };
+      if (!Array.isArray(data.questions) || !data.questions.length ||
+          data.questions.some((question) => !question || typeof question.question !== "string")) {
+        throw new Error("A IA não retornou perguntas. Tente gerar novamente.");
+      }
 
-      // Envia as perguntas geradas de volta para o estado do formulário principal
-      onQuizGenerated(quizWithCategory);
-      onClose();
-      setTopic("");
+      setDraft({ title: typeof data.title === "string" && data.title.trim() ? data.title : topic, category, questions: data.questions });
     } catch (err) {
       setErrorMsg(err.message || "Erro ao conectar com a IA.");
     } finally {
@@ -61,15 +58,40 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
     }
   };
 
+  const updateQuestion = (index, changes) => {
+    setDraft((previous) => ({
+      ...previous,
+      questions: previous.questions.map((question, position) =>
+        position === index ? { ...question, ...changes } : question
+      ),
+    }));
+  };
+
+  const handleSave = async (event) => {
+    event.preventDefault();
+    setLoading(true);
+    setErrorMsg("");
+    try {
+      await onSaveQuiz(draft);
+      onClose();
+    } catch (error) {
+      setErrorMsg(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fieldClass = "w-full rounded-xl border border-[var(--card-border)] bg-[var(--background)] p-2";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+      <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-[var(--card-bg)] border border-[var(--card-border)] rounded-3xl p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
         
         {/* Cabeçalho */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <span className="p-2 rounded-xl bg-purple-500/10 text-purple-400 text-lg">✨</span>
-            <h3 className="text-lg font-bold text-[var(--foreground)]">Gerar Quiz com IA</h3>
+            <h3 className="text-lg font-bold text-[var(--foreground)]">{draft ? "Revisar quiz gerado" : "Gerar Quiz com IA"}</h3>
           </div>
           <button
             onClick={onClose}
@@ -80,16 +102,72 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
           </button>
         </div>
 
-        <p className="text-xs text-[var(--foreground)] opacity-70 mb-5 leading-relaxed">
+        {!draft && <p className="text-xs text-[var(--foreground)] opacity-70 mb-5 leading-relaxed">
           Escolha a categoria e informe o tema desejado. A IA elaborará perguntas, alternativas e o gabarito adequados ao contexto.
-        </p>
+        </p>}
 
         {errorMsg && (
-          <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs">
+          <div role="alert" className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs">
             {errorMsg}
           </div>
         )}
 
+        {draft ? (
+          <form onSubmit={handleSave} className="space-y-4 text-sm">
+            <fieldset disabled={loading} className="space-y-4">
+              <label className="block">
+                Título
+                <input className={fieldClass} required value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+              </label>
+              {draft.questions.map((question, index) => (
+                <fieldset key={index} className="space-y-2 rounded-xl border border-[var(--card-border)] p-3">
+                  <legend>Pergunta {index + 1}</legend>
+                  <textarea aria-label={`Enunciado da pergunta ${index + 1}`} className={fieldClass} required value={question.question ?? ""} onChange={(e) => updateQuestion(index, { question: e.target.value })} />
+                  {question.type === "true_false" ? (
+                    <label className="block">
+                      Gabarito
+                      <select className={fieldClass} value={String(question.isTrue ?? "")} onChange={(e) => updateQuestion(index, { isTrue: e.target.value === "true" })}>
+                        <option value="" disabled>Selecione a resposta</option>
+                        <option value="true">Verdadeiro</option>
+                        <option value="false">Falso</option>
+                      </select>
+                    </label>
+                  ) : question.type === "fill_blanks" || question.type === "sequence_order" ? (
+                    (question.type === "fill_blanks"
+                      ? [["correctSequence", "Respostas das lacunas, uma por linha"], ["distractors", "Distratores, um por linha"]]
+                      : [["correctOrder", "Etapas na ordem correta, uma por linha"]]
+                    ).map(([field, label]) => (
+                      <label key={field} className="block">
+                        {label}
+                        <textarea className={fieldClass} value={Array.isArray(question[field]) ? question[field].join("\n") : ""} onChange={(e) => updateQuestion(index, { [field]: e.target.value.split("\n") })} />
+                      </label>
+                    ))
+                  ) : (
+                    Array.from({ length: 4 }, (_, optionIndex) => {
+                      const choices = Array.from({ length: 4 }, (_, position) => question.options?.[position] ?? {});
+                      return (
+                        <div key={optionIndex} className="flex items-center gap-2">
+                          <input type="radio" name={`answer-${index}`} aria-label={`Marcar alternativa ${optionIndex + 1} como correta`} checked={choices[optionIndex].is_correct === true} onChange={() => updateQuestion(index, { options: choices.map((choice, position) => ({ ...choice, is_correct: position === optionIndex })) })} />
+                          <input className={fieldClass} required aria-label={`Alternativa ${optionIndex + 1}`} value={choices[optionIndex].text ?? ""} onChange={(e) => updateQuestion(index, { options: choices.map((choice, position) => position === optionIndex ? { ...choice, text: e.target.value } : choice) })} />
+                        </div>
+                      );
+                    })
+                  )}
+                  <label className="block">
+                    Tempo em segundos
+                    <input className={fieldClass} type="number" min="1" step="1" required value={question.time_seconds ?? 20} onChange={(e) => updateQuestion(index, { time_seconds: e.target.value })} />
+                  </label>
+                </fieldset>
+              ))}
+            </fieldset>
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={onClose} disabled={loading}>Cancelar</button>
+              <button type="submit" disabled={loading} className="rounded-xl bg-purple-600 px-4 py-2 font-bold text-white disabled:opacity-50">
+                {loading ? "Salvando..." : "Salvar quiz"}
+              </button>
+            </div>
+          </form>
+        ) : (
         <form onSubmit={handleGenerate} className="space-y-4 text-xs font-medium">
           {/* Categoria */}
           <div>
@@ -131,17 +209,16 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
               <label className="block text-[var(--foreground)] mb-1 font-semibold">
                 Nº de Perguntas:
               </label>
-              <select
+              <input
+                type="number"
+                min="1"
+                max={maxQuestions}
+                required
                 value={count}
                 onChange={(e) => setCount(e.target.value)}
                 disabled={loading}
                 className="w-full bg-[var(--background)] border border-[var(--card-border)] text-[var(--foreground)] rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer"
-              >
-                <option value={3}>3 perguntas</option>
-                <option value={5}>5 perguntas</option>
-                <option value={8}>8 perguntas</option>
-                <option value={10}>10 perguntas</option>
-              </select>
+              />
             </div>
 
             <div>
@@ -190,6 +267,7 @@ export default function AiQuizGeneratorModal({ isOpen, onClose, onQuizGenerated 
             </button>
           </div>
         </form>
+        )}
       </div>
     </div>
   );

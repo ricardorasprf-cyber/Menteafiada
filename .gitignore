@@ -25,6 +25,12 @@ yarn-error.log*
 .env.development.local
 .env.test.local
 .env.production.local
+.env.e2e.local
+playwright-report/
+test-results/
+playwright/.auth/
+.playwright-app/
+.playwright-mcp/
 
 # Ficheiros do sistema operativo e configurações de IDE
 .DS_Store
@@ -51,3 +57,6 @@ base_02_apis_lib.md
 base_03_infra_sql.md
 base_04_dashboards_jogo.md
 temp_base.md
+/base_0[5-9]_*.md
+/base_foco_*.md
+/recuperacao-menteafiada-*.zip

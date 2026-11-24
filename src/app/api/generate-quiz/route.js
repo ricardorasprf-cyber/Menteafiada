@@ -3,27 +3,65 @@
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/api/generate-quiz/route.js
  * Objetivo: Geração pedagógica automatizada de questionários via Gemini API
- * com suporte aos 4 formatos interativos da plataforma:
- * 1. multiple_choice (Múltipla Escolha com 4 alternativas);
- * 2. fill_blanks (Completar Lacunas "___" com banco de palavras sugeridas);
- * 3. sequence_order (Ordenação Sequencial / Procedimental);
- * 4. true_false (Verdadeiro ou Falso Relâmpago).
+ * com suporte aos 4 formatos interativos da plataforma e conformidade estrita
+ * de cotas por plano (`PLAN_LIMITS`):
+ *   1. multiple_choice (Múltipla Escolha com 4 alternativas);
+ *   2. fill_blanks (Completar Lacunas "___" com banco de palavras sugeridas);
+ *   3. sequence_order (Ordenação Sequencial / Procedimental);
+ *   4. true_false (Verdadeiro ou Falso Relâmpago).
  * ============================================================================
  */
 
 import { NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { GoogleGenAI } from "@google/genai";
+import { resolveUserPlan } from "@/lib/planLimits";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req) {
   try {
+    // 1. Verificação de autenticação e nível de plano via Clerk
+    const { userId, sessionClaims } = await auth();
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Autenticação obrigatória para gerar questões com IA." },
+        { status: 401 }
+      );
+    }
+
+    const userRole =
+      sessionClaims?.metadata?.role ||
+      sessionClaims?.publicMetadata?.role ||
+      "participant";
+    const planTier =
+      sessionClaims?.metadata?.plan_tier ||
+      sessionClaims?.publicMetadata?.plan_tier ||
+      "free";
+
+    const plan = resolveUserPlan(userRole, planTier);
+
+    // 2. Bloqueio do perfil Explorador (Grátis) no Gerador IA
+    if (!plan.canUseAiGenerator) {
+      return NextResponse.json(
+        {
+          error:
+            "O Gerador de Quizzes com IA é exclusivo para assinantes Aluno Pro, Professor Pro ou Institucional.",
+          code: "PLAN_UPGRADE_REQUIRED",
+          currentPlan: plan.key,
+        },
+        { status: 403 }
+      );
+    }
+
     const body = await req.json();
     const {
       topic = "",
       difficulty = "médio",
       amount,
       questionCount,
+      count: legacyCount,
       category = "Conhecimentos Gerais",
       language = "pt-BR",
       mixedFormats = true,
@@ -45,8 +83,21 @@ export async function POST(req) {
     }
 
     const ai = new GoogleGenAI({ apiKey });
-    const rawTotal = amount ?? questionCount ?? 5;
-    const count = Math.min(Math.max(Number(rawTotal) || 5, 1), 15);
+
+    // 3. Limita o número de questões geradas ao teto permitido pelo plano atual
+    const rawTotal = amount ?? questionCount ?? legacyCount ?? 5;
+    const requestedCount = Number(rawTotal);
+    if (
+      !["number", "string"].includes(typeof rawTotal) ||
+      !Number.isSafeInteger(requestedCount) ||
+      requestedCount < 1
+    ) {
+      return NextResponse.json(
+        { error: "Informe uma quantidade inteira e positiva de questões." },
+        { status: 400 }
+      );
+    }
+    const count = Math.min(requestedCount, plan.maxAiQuestionsPerRequest);
 
     const prompt = `
 Você é um especialista em avaliação educacional da plataforma MenteAfiada.
@@ -123,9 +174,13 @@ Responda ESTRITAMENTE com um objeto JSON válido (sem blocos markdown \`\`\`json
 
     return NextResponse.json({
       success: true,
+      planApplied: plan.key,
+      maxQuestionsAllowed: plan.maxAiQuestionsPerRequest,
       title: parsed.title || `Quiz: ${topic}`,
       category: parsed.category || category,
-      questions: Array.isArray(parsed.questions) ? parsed.questions : [],
+      questions: Array.isArray(parsed.questions)
+        ? parsed.questions.slice(0, count)
+        : [],
     });
   } catch (err) {
     console.error("[Generate Quiz API Error]:", err);

@@ -1,15 +1,15 @@
 /**
  * ============================================================================
  * Plataforma Educacional MenteAfiada
- * Arquivo: src/app/api/game/answer/route.js
+ * Arquivo: src/app/api/game/route.js
  * Objetivo: Endpoint seguro e idempotente para registro de respostas nas
  * batalhas da Arena e salas ao vivo:
- * - Impede pontuação duplicada caso o participante saia, recarregue a página
- *   ou tente reenviar a mesma questão;
- * - Valida a resposta diretamente no banco de dados via RPC atômica
- *   (submit_game_answer_secure);
- * - Disponibiliza consulta GET para verificar se o jogador já respondeu à
- *   questão atual ao reentrar na sala.
+ *   - Impede pontuação duplicada caso o participante saia, recarregue a página
+ *     ou tente reenviar a mesma questão;
+ *   - Valida a resposta diretamente no banco de dados via RPC atômica
+ *     (submit_game_answer_secure);
+ *   - Disponibiliza consulta GET para verificar se o jogador já respondeu à
+ *     questão atual ao reentrar na sala.
  * ============================================================================
  */
 
@@ -108,7 +108,7 @@ export async function POST(req) {
     // Verifica se a sala ainda está ativa ('in_progress')
     const { data: room, error: roomErr } = await supabaseAdmin
       .from("game_rooms")
-      .select("id, status")
+      .select("id, status, is_arena")
       .eq("id", roomId)
       .maybeSingle();
 
@@ -136,7 +136,6 @@ export async function POST(req) {
         .eq("clerk_id", userId);
 
       const playerIdsForUser = (userPlayers || []).map((p) => p.id);
-
       if (playerIdsForUser.length > 0) {
         const { data: previousUserAnswer } = await supabaseAdmin
           .from("game_answers")

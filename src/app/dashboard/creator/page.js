@@ -3,14 +3,9 @@
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/dashboard/creator/page.js
  * Objetivo: Estúdio de Criação e Gestão de Cursos, Videoaulas e E-books PDF,
- * integrado ao ThemeProvider global ("theme-classic", "theme-dark",
- * "theme-synthwave") e ao Supabase (`courses` e `course_lessons`):
- * - Criação e edição de cursos com classificação de acesso (Gratuito vs.
- *   Exclusivo Aluno Pro), carga horária, categoria e ícone;
- * - Adição e ordenação de módulos/aulas com link de videoaula (YouTube,
- *   Vimeo ou MP4), resumo pedagógico e anexo de E-book / Apostila PDF;
- * - Exibição de aviso de plano caso um usuário gratuito tente publicar
- *   cursos exclusivos sem o perfil Educador Pro.
+ * integrado ao ThemeProvider global ("theme-classic", "theme-sepia",
+ * "theme-dark", "theme-synthwave"), ao Supabase (`courses` e `course_lessons`)
+ * e às regras de conformidade comercial (`PLAN_LIMITS`).
  * ============================================================================
  */
 
@@ -23,6 +18,7 @@ import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/app/components/ThemeProvider";
+import { resolveUserPlan, formatLimitValue } from "@/lib/planLimits";
 
 const CREATOR_THEMES = {
   "theme-classic": {
@@ -38,6 +34,20 @@ const CREATOR_THEMES = {
       "bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-md shadow-indigo-500/20",
     btnSecondary:
       "bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300",
+  },
+  "theme-sepia": {
+    mainBg: "bg-[#f7f3e8] text-[#292524]",
+    ambientGlow:
+      "bg-[radial-gradient(ellipse_85%_60%_at_50%_-10%,rgba(180,83,9,0.12),transparent)]",
+    badge: "bg-amber-100 border-amber-300 text-amber-900",
+    card: "bg-[#fffdf8] border-[#e6dec8] shadow-lg shadow-amber-950/10 text-[#292524]",
+    subBox: "bg-[#faf6eb] border-[#e6dec8] text-[#292524]",
+    input:
+      "bg-[#faf6eb] border-[#d6cbb2] text-[#292524] focus:border-amber-700",
+    btnPrimary:
+      "bg-gradient-to-r from-amber-800 to-amber-700 hover:from-amber-700 hover:to-amber-600 text-white shadow-md shadow-amber-900/20",
+    btnSecondary:
+      "bg-[#f0e9d6] hover:bg-[#e6dec8] text-[#292524] border border-[#d6cbb2]",
   },
   "theme-dark": {
     mainBg: "bg-[#070b19] text-slate-100",
@@ -86,15 +96,13 @@ export default function CreatorCoursesStudioPage() {
     user?.unsafeMetadata?.plan_tier ||
     "free";
 
-  const isOwner = userRole === "owner";
-  const canPublishCourses =
-    isOwner ||
-    ["creator", "creator_pro", "educator", "teacher", "manager", "admin"].includes(
-      userRole
-    ) ||
-    ["creator_pro", "institutional"].includes(planTier);
+  // Resolução centralizada do plano comercial e cotas de cursos
+  const userPlan = resolveUserPlan(userRole, planTier);
+  const isOwner = userPlan.key === "owner";
+  const canPublishCourses = userPlan.canCreateCourses;
 
   const [courses, setCourses] = useState([]);
+  const [myCoursesCount, setMyCoursesCount] = useState(0);
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [lessons, setLessons] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -142,6 +150,11 @@ export default function CreatorCoursesStudioPage() {
       const { data, error } = await query;
       if (!error && data) {
         setCourses(data);
+        const ownCount = isOwner
+          ? data.filter((c) => c.creator_clerk_id === user.id).length
+          : data.length;
+        setMyCoursesCount(ownCount);
+
         if (data.length > 0 && !selectedCourse) {
           setSelectedCourse(data[0]);
         }
@@ -182,10 +195,27 @@ export default function CreatorCoursesStudioPage() {
     }
   }, [selectedCourse?.id, loadLessonsForCourse]);
 
-  // Criar Novo Curso
+  const isCourseQuotaReached =
+    userPlan.maxCourses !== Infinity && myCoursesCount >= userPlan.maxCourses;
+
+  // Criar Novo Curso (com validação estrita de cota do plano)
   const handleCreateCourse = async (e) => {
     e.preventDefault();
     if (!courseForm.title.trim() || !user?.id) return;
+
+    if (!canPublishCourses) {
+      setFeedbackMsg(
+        "⚠️ Seu plano atual não permite publicar cursos. Faça upgrade para o Professor / Criador Pro."
+      );
+      return;
+    }
+
+    if (isCourseQuotaReached) {
+      setFeedbackMsg(
+        `⚠️ Você atingiu o limite de ${userPlan.maxCourses} cursos do plano ${userPlan.label}. Faça upgrade para o plano Institucional para cursos ilimitados.`
+      );
+      return;
+    }
 
     setCreatingCourse(true);
     setFeedbackMsg("");
@@ -213,6 +243,7 @@ export default function CreatorCoursesStudioPage() {
         );
       } else if (data) {
         setCourses((prev) => [data, ...prev]);
+        setMyCoursesCount((prev) => prev + 1);
         setSelectedCourse(data);
         setCourseForm({
           title: "",
@@ -295,9 +326,13 @@ export default function CreatorCoursesStudioPage() {
     )
       return;
 
+    const target = courses.find((c) => c.id === courseId);
     await supabase.from("courses").delete().eq("id", courseId);
     const remaining = courses.filter((c) => c.id !== courseId);
     setCourses(remaining);
+    if (target?.creator_clerk_id === user?.id) {
+      setMyCoursesCount((prev) => Math.max(0, prev - 1));
+    }
     setSelectedCourse(remaining[0] || null);
   };
 
@@ -310,13 +345,17 @@ export default function CreatorCoursesStudioPage() {
           className={`max-w-lg w-full border rounded-3xl p-8 text-center space-y-5 ${styles.card}`}
         >
           <span className="text-5xl block">🚀</span>
+          <div className="inline-flex items-center px-3 py-1 rounded-full bg-indigo-500/15 text-indigo-500 text-[11px] font-black">
+            Plano Atual: {userPlan.label}
+          </div>
           <h1 className="text-2xl font-black">
             Estúdio Exclusivo para Educadores
           </h1>
           <p className="text-xs md:text-sm opacity-75 leading-relaxed">
             Para publicar seus próprios cursos em videoaulas, apostilas e
             e-books em PDF na plataforma MenteAfiada, ative o perfil{" "}
-            <strong>Educador Pro</strong>.
+            <strong>Professor / Criador Pro</strong> ou{" "}
+            <strong>Institucional</strong>.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
             <Link
@@ -346,14 +385,20 @@ export default function CreatorCoursesStudioPage() {
       />
 
       <div className="relative z-10 max-w-7xl mx-auto px-6 pt-8 space-y-8">
-        {/* Cabeçalho do Estúdio */}
+        {/* Cabeçalho do Estúdio + Indicador de Plano e Cota */}
         <section className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-2">
-            <span
-              className={`inline-flex items-center gap-2 px-3.5 py-1 rounded-full border text-xs font-black uppercase tracking-widest ${styles.badge}`}
-            >
-              <span>🎬</span> ESTÚDIO DE CURSOS, VIDEOAULAS & E-BOOKS
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className={`inline-flex items-center gap-2 px-3.5 py-1 rounded-full border text-xs font-black uppercase tracking-widest ${styles.badge}`}
+              >
+                <span>🎬</span> ESTÚDIO DE CURSOS, VIDEOAULAS & E-BOOKS
+              </span>
+              <span className="px-3 py-1 rounded-full text-[11px] font-black bg-emerald-500/15 text-emerald-500 border border-emerald-500/25">
+                {userPlan.label} • Cursos: {myCoursesCount} /{" "}
+                {formatLimitValue(userPlan.maxCourses)}
+              </span>
+            </div>
             <h1 className="text-3xl md:text-4xl font-black tracking-tight">
               Publicar & Gerenciar Conteúdos
             </h1>
@@ -394,9 +439,29 @@ export default function CreatorCoursesStudioPage() {
               onSubmit={handleCreateCourse}
               className={`border rounded-3xl p-6 space-y-4 ${styles.card}`}
             >
-              <h2 className="text-lg font-black flex items-center gap-2">
-                <span>➕</span> Novo Curso ou E-book
-              </h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-black flex items-center gap-2">
+                  <span>➕</span> Novo Curso ou E-book
+                </h2>
+                <span className="text-[11px] font-bold opacity-70">
+                  {myCoursesCount}/{formatLimitValue(userPlan.maxCourses)}
+                </span>
+              </div>
+
+              {isCourseQuotaReached && (
+                <div className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/35 space-y-2">
+                  <p className="text-xs font-bold text-amber-600 dark:text-amber-300">
+                    🔒 Você atingiu o limite de {userPlan.maxCourses} cursos do
+                    plano {userPlan.label}.
+                  </p>
+                  <Link
+                    href="/planos"
+                    className="inline-block px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs"
+                  >
+                    Migrar para Institucional (Ilimitado) →
+                  </Link>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-extrabold mb-1">
@@ -539,7 +604,7 @@ export default function CreatorCoursesStudioPage() {
 
               <button
                 type="submit"
-                disabled={creatingCourse}
+                disabled={creatingCourse || isCourseQuotaReached}
                 className={`w-full py-3.5 rounded-2xl text-xs font-extrabold transition cursor-pointer disabled:opacity-50 ${styles.btnPrimary}`}
               >
                 {creatingCourse ? "Publicando Curso..." : "Publicar Curso Agora"}

@@ -7,10 +7,17 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:e2e": "playwright test",
+    "test:e2e:app": "node scripts/run-e2e.mjs test",
+    "test:e2e:serve": "node scripts/run-e2e.mjs server",
+    "test:e2e:ui": "playwright test --ui",
+    "test:visual": "node scripts/run-e2e.mjs test tests/visual",
+    "test:e2e:report": "playwright show-report",
     "apply": "node scripts/apply-code.js",
     "apply:sync": "node scripts/apply-code.js --sync",
     "push": "git add . && git commit -m \"update\" && git push -u origin main",
     "push-drive": "node scripts/upload-drive.js",
+    "focus": "node scripts/push-focus.js",
     "watch:push-drive": "node ./scripts/auto-push.js"
   },
   "dependencies": {
@@ -27,6 +34,8 @@
     "svix": "^2.9.1"
   },
   "devDependencies": {
+    "@clerk/testing": "2.3.7",
+    "@playwright/test": "1.65.1",
     "@tailwindcss/postcss": "^4.3.5",
     "@tailwindcss/turbopack": "^4",
     "eslint": "^9",
