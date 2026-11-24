@@ -2,13 +2,14 @@
  * ============================================================================
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/game/host/page.js
- * Objetivo: Painel de Controle do Professor / Anfitrião com:
- * - Atalhos de Teclado de Apresentação (Espaço/Enter: Play/Pause/Gabarito,
- *   Setas Esquerda/Direita: Questão Anterior/Próxima, Q: QR Code, G: Gaveta);
- * - Persistência da Nuvem de Palavras e Termômetro no Relatório Final (PDF/CSV);
- * - Modal de QR Code & Link exibindo em tempo real quantos alunos estão ativos;
- * - Barra de Acesso Rápido sempre visível no topo da projeção;
- * - Gaveta Lateral Retrátil à esquerda ("▶ 🎛️") para controles secundários.
+ * Objetivo: Painel de Controle do Professor / Anfitrião com conformidade de
+ * capacidade máxima de jogadores por plano (`PLAN_LIMITS`) e:
+ *   - Atalhos de Teclado de Apresentação (Espaço/Enter: Play/Pause/Gabarito,
+ *     Setas Esquerda/Direita: Questão Anterior/Próxima, Q: QR Code, G: Gaveta);
+ *   - Persistência da Nuvem de Palavras e Termômetro no Relatório Final (PDF/CSV);
+ *   - Modal de QR Code & Link exibindo em tempo real quantos alunos estão ativos;
+ *   - Barra de Acesso Rápido sempre visível no topo da projeção;
+ *   - Gaveta Lateral Retrátil à esquerda ("▶ 🎛️") para controles secundários.
  * ============================================================================
  */
 
@@ -17,6 +18,7 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
@@ -29,6 +31,7 @@ import LiveWordCloud from "@/app/components/LiveWordCloud";
 import QuickPulseOverlay from "@/app/components/QuickPulseOverlay";
 import { QUIZ_CATEGORIES } from "@/constants/categories";
 import { sounds } from "@/lib/soundEffects";
+import { resolveUserPlan, formatLimitValue } from "@/lib/planLimits";
 
 // Normalizador defensivo: converte string JSONB ou objeto/array em formato estruturado
 function parseQuestionOptions(rawOptions) {
@@ -75,6 +78,27 @@ const HOST_STYLES = {
       "bg-slate-100 border-slate-300 hover:bg-slate-200 text-slate-800",
     imageWrapper: "bg-slate-100 border-slate-200",
     modalBox: "bg-white border-slate-200 text-slate-900 shadow-2xl",
+  },
+  "theme-sepia": {
+    mainBg: "bg-[#f7f3e8] text-[#292524]",
+    subBanner:
+      "bg-gradient-to-r from-[#efe7d3] via-[#f7f3e8] to-[#fffdf8] border-b border-[#e0d6bc] text-[#292524]",
+    backLink: "text-[#78716c] hover:text-amber-800",
+    bannerTitle: "text-[#292524]",
+    bannerSubtitle: "text-[#57534e]",
+    soundBtn:
+      "bg-[#fffdf8] border-[#d6cbb2] text-[#44403c] hover:border-amber-700 shadow-sm",
+    card: "bg-[#fffdf8] border-[#e6dec8] shadow-xl shadow-amber-950/10 text-[#292524]",
+    drawerPanel:
+      "bg-[#fffdf8]/95 border-r border-[#e0d6bc] shadow-2xl text-[#292524] backdrop-blur-xl",
+    drawerTab:
+      "bg-amber-800 hover:bg-amber-700 text-white border-amber-600 shadow-lg shadow-amber-900/30",
+    subBox: "bg-[#faf6eb] border-[#e6dec8] text-[#292524]",
+    input: "bg-[#faf6eb] border-[#d6cbb2] text-[#292524]",
+    neutralBtn:
+      "bg-[#f0e9d6] border-[#d6cbb2] hover:bg-[#e6dec8] text-[#292524]",
+    imageWrapper: "bg-[#faf6eb] border-[#e6dec8]",
+    modalBox: "bg-[#fffdf8] border-[#e6dec8] text-[#292524] shadow-2xl",
   },
   "theme-dark": {
     mainBg: "bg-[#070b19] text-slate-100",
@@ -125,8 +149,22 @@ function HostGameContent() {
   const { user } = useUser();
   const { t } = useLanguage();
   const { theme } = useTheme();
+  const searchParams = useSearchParams();
+  const preselectedQuizId = searchParams?.get("quizId") || "";
 
   const styles = HOST_STYLES[theme] || HOST_STYLES["theme-classic"];
+
+  // Resolução do plano e limite máximo de jogadores da sala
+  const userRole =
+    user?.publicMetadata?.role ||
+    user?.unsafeMetadata?.role ||
+    "participant";
+  const planTier =
+    user?.publicMetadata?.plan_tier ||
+    user?.unsafeMetadata?.plan_tier ||
+    "free";
+  const userPlan = resolveUserPlan(userRole, planTier);
+  const maxRoomPlayers = userPlan.maxPlayersPerRoom;
 
   // Estados principais da sessão
   const [quizzes, setQuizzes] = useState([]);
@@ -134,6 +172,7 @@ function HostGameContent() {
   const [selectedQuizId, setSelectedQuizId] = useState("");
   const [session, setSession] = useState(null);
   const [players, setPlayers] = useState([]);
+  const [roomCapacityWarning, setRoomCapacityWarning] = useState(false);
   const [questions, setQuestions] = useState([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState([]);
@@ -237,8 +276,10 @@ function HostGameContent() {
       .order("created_at", { ascending: false });
     if (data && data.length > 0) {
       setQuizzes(data);
-      setSelectedQuizId(data[0].id);
-      setNextQuizId(data[0].id);
+      const validPreselected = data.find((q) => q.id === preselectedQuizId);
+      const defaultId = validPreselected ? validPreselected.id : data[0].id;
+      setSelectedQuizId(defaultId);
+      setNextQuizId(defaultId);
     } else {
       const defaultQuiz = [
         {
@@ -318,6 +359,7 @@ function HostGameContent() {
       setHasStartedQuestion(false);
       setRevealCorrectAnswer(false);
       setIsDrawerOpen(false);
+      setRoomCapacityWarning(false);
       setWordCloudReport(null);
       setQuickPulseReport(null);
       subscribeToRealtime(sessionData.id);
@@ -341,8 +383,37 @@ function HostGameContent() {
             .from("game_players")
             .select("*")
             .eq("session_id", sessionId)
-            .order("score", { ascending: false });
-          if (data) setPlayers(data);
+            .order("created_at", { ascending: true });
+
+          if (data) {
+            // Verifica e aplica conformidade de capacidade máxima de jogadores do plano
+            if (
+              maxRoomPlayers !== Infinity &&
+              data.length > maxRoomPlayers
+            ) {
+              const allowedPlayers = data.slice(0, maxRoomPlayers);
+              const overflowPlayers = data.slice(maxRoomPlayers);
+              const overflowIds = overflowPlayers.map((op) => op.id);
+
+              setRoomCapacityWarning(true);
+              if (overflowIds.length > 0) {
+                await supabase
+                  .from("game_players")
+                  .delete()
+                  .in("id", overflowIds);
+              }
+
+              setPlayers(
+                [...allowedPlayers].sort(
+                  (a, b) => (b.score || 0) - (a.score || 0)
+                )
+              );
+            } else {
+              setPlayers(
+                [...data].sort((a, b) => (b.score || 0) - (a.score || 0))
+              );
+            }
+          }
         }
       )
       .subscribe();
@@ -532,11 +603,9 @@ function HostGameContent() {
     if (!session || session.status === "FINALIZADO") return;
 
     const handleKeyDown = (e) => {
-      // Ignora atalhos quando o professor estiver digitando em inputs/textareas
       const tag = document.activeElement?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
 
-      // Se algum modal de interação estiver aberto, respeita apenas ESC ou Q
       if (
         showWordCloudModal ||
         showQuickPulseModal ||
@@ -921,7 +990,7 @@ function HostGameContent() {
                     </h2>
                     <span className="text-[11px] font-mono opacity-70">
                       PIN: <strong className="text-amber-500">{session.pin}</strong> •{" "}
-                      {players.length} online
+                      {players.length}/{formatLimitValue(maxRoomPlayers)} alunos
                     </span>
                   </div>
                 </div>
@@ -1011,7 +1080,9 @@ function HostGameContent() {
                   className={`py-2.5 px-3 border font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${styles.neutralBtn}`}
                 >
                   <span>📱</span>
-                  <span>QR Code ({players.length})</span>
+                  <span>
+                    QR Code ({players.length}/{formatLimitValue(maxRoomPlayers)})
+                  </span>
                 </button>
 
                 <button
@@ -1179,7 +1250,12 @@ function HostGameContent() {
               {t("back_home") || "Voltar"}
             </Link>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-3 py-1 rounded-full text-[11px] font-black bg-indigo-500/15 text-indigo-500 border border-indigo-500/25">
+                Plano: {userPlan.label} (Capacidade:{" "}
+                {formatLimitValue(maxRoomPlayers)} alunos)
+              </span>
+
               {session && session.status !== "FINALIZADO" && (
                 <button
                   type="button"
@@ -1212,7 +1288,9 @@ function HostGameContent() {
               >
                 🎮 {t("host_panel_title") || "Painel do Anfitrião"}
               </h1>
-              <p className={`text-xs md:text-sm font-medium mt-1 ${styles.bannerSubtitle}`}>
+              <p
+                className={`text-xs md:text-sm font-medium mt-1 ${styles.bannerSubtitle}`}
+              >
                 {!session
                   ? t("host_panel_desc_waiting") ||
                     "Crie uma sala para começar."
@@ -1230,6 +1308,23 @@ function HostGameContent() {
               </button>
             )}
           </div>
+
+          {/* Alerta discreto caso a lotação máxima do plano seja atingida */}
+          {roomCapacityWarning && (
+            <div className="mt-4 p-3 rounded-2xl bg-amber-500/15 border border-amber-500/35 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <span className="font-bold text-amber-600 dark:text-amber-300">
+                ⚠️ Capacidade máxima de {maxRoomPlayers} alunos do plano{" "}
+                {userPlan.label} atingida. Novas conexões excedentes foram
+                bloqueadas automaticamente.
+              </span>
+              <Link
+                href="/planos"
+                className="px-3 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black whitespace-nowrap text-center"
+              >
+                Ampliar Capacidade →
+              </Link>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1240,6 +1335,14 @@ function HostGameContent() {
           <div
             className={`max-w-md mx-auto p-8 rounded-3xl border text-center transition-colors duration-300 ${styles.card}`}
           >
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/25 text-purple-500 text-[11px] font-black mb-3">
+              <span>👥</span>
+              <span>
+                Limite da sala ({userPlan.label}): até{" "}
+                {formatLimitValue(maxRoomPlayers)} participantes
+              </span>
+            </div>
+
             <h2 className="text-2xl font-bold mb-2">
               {t("new_activity") || "Nova Atividade"}
             </h2>
@@ -1369,7 +1472,8 @@ function HostGameContent() {
                 >
                   <span>📱</span>
                   <span>
-                    {t("qr_code_link") || "QR Code"} ({players.length})
+                    {t("qr_code_link") || "QR Code"} ({players.length}/
+                    {formatLimitValue(maxRoomPlayers)})
                   </span>
                 </button>
                 <button
@@ -1415,7 +1519,8 @@ function HostGameContent() {
                 <span
                   className={`border px-3 py-1 rounded-full text-xs font-bold ${styles.subBox}`}
                 >
-                  {players.length} {t("connected") || "conectados"}
+                  {players.length} / {formatLimitValue(maxRoomPlayers)}{" "}
+                  {t("connected") || "conectados"}
                 </span>
               </div>
 
@@ -1490,7 +1595,9 @@ function HostGameContent() {
                   title="Exibir QR Code, PIN e contador de alunos ativos (Tecla Q)"
                 >
                   <span>📱</span>
-                  <span>QR Code ({players.length})</span>
+                  <span>
+                    QR Code ({players.length}/{formatLimitValue(maxRoomPlayers)})
+                  </span>
                 </button>
 
                 <button
@@ -1588,7 +1695,6 @@ function HostGameContent() {
                 </p>
               </div>
             ) : (
-              /* Estado 2 & 3: Opções visíveis; gabarito destacado apenas quando revealCorrectAnswer === true */
               <>
                 {activeQuestionType === "fill_blanks" && (
                   <div className="space-y-3">
@@ -1817,7 +1923,9 @@ function HostGameContent() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className={`p-4 border rounded-2xl space-y-1 ${styles.subBox}`}>
+                <div
+                  className={`p-4 border rounded-2xl space-y-1 ${styles.subBox}`}
+                >
                   <span className="text-xs opacity-70 font-semibold">
                     Taxa Global de Acerto
                   </span>
@@ -1869,7 +1977,6 @@ function HostGameContent() {
                 </div>
               </div>
 
-              {/* Diagnóstico Consolidado de Engajamento ao Vivo (Nuvem & Termômetro) */}
               {(wordCloudReport || quickPulseReport) && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
                   {wordCloudReport && (
@@ -2049,10 +2156,12 @@ function HostGameContent() {
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
                   <span>
                     {players.length === 0
-                      ? "Aguardando alunos entrarem..."
-                      : players.length === 1
-                      ? "1 aluno ativo na sala"
-                      : `${players.length} alunos ativos na sala`}
+                      ? `Aguardando alunos (Máx: ${formatLimitValue(
+                          maxRoomPlayers
+                        )})...`
+                      : `${players.length} / ${formatLimitValue(
+                          maxRoomPlayers
+                        )} alunos ativos na sala`}
                   </span>
                 </div>
 

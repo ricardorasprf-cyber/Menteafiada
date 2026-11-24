@@ -25,6 +25,12 @@ yarn-error.log*
 .env.development.local
 .env.test.local
 .env.production.local
+.env.e2e.local
+playwright-report/
+test-results/
+playwright/.auth/
+.playwright-app/
+.playwright-mcp/
 
 # Ficheiros do sistema operativo e configurações de IDE
 .DS_Store

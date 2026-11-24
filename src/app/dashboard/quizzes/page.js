@@ -2,11 +2,12 @@
  * ============================================================================
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/dashboard/quizzes/page.js
- * Objetivo: Gestão completa de questionários pedagógicos com 4 formatos:
- * 1. Múltipla Escolha (4 alternativas);
- * 2. Completar Lacunas ("___") com palavras sugeridas na sequência lógica;
- * 3. Ordenação Sequencial (etapas procedimentais / cronológicas);
- * 4. Verdadeiro ou Falso Relâmpago.
+ * Objetivo: Gestão completa de questionários pedagógicos com 4 formatos e
+ * conformidade estrita de cotas e permissões por plano (`PLAN_LIMITS`):
+ *   1. Múltipla Escolha (4 alternativas);
+ *   2. Completar Lacunas ("___") com palavras sugeridas na sequência lógica;
+ *   3. Ordenação Sequencial (etapas procedimentais / cronológicas);
+ *   4. Verdadeiro ou Falso Relâmpago.
  * ============================================================================
  */
 
@@ -21,6 +22,7 @@ import { useTheme } from "@/app/components/ThemeProvider";
 import AiQuizGeneratorModal from "@/app/components/AiQuizGeneratorModal";
 import ImportQuizModal from "@/app/components/ImportQuizModal";
 import { QUIZ_CATEGORIES } from "@/constants/categories";
+import { resolveUserPlan, formatLimitValue } from "@/lib/planLimits";
 
 const QUIZZES_PAGE_STYLES = {
   "theme-classic": {
@@ -43,6 +45,27 @@ const QUIZZES_PAGE_STYLES = {
     iconBtn:
       "bg-white border-slate-200 hover:bg-slate-100 text-slate-700",
     modalBox: "bg-white border-slate-200 text-slate-900 shadow-2xl",
+  },
+  "theme-sepia": {
+    mainBg: "bg-[#f7f3e8] text-[#292524]",
+    cardPanel:
+      "bg-[#fffdf8] border-[#e6dec8] shadow-lg shadow-amber-950/10 text-[#292524]",
+    tabsContainer: "bg-[#f0e9d6] border-[#e0d6bc]",
+    tabInactive: "text-[#78716c] hover:text-[#292524]",
+    quizItemDefault:
+      "bg-[#faf6eb] border-[#e6dec8] text-[#292524] hover:border-amber-600",
+    quizItemSelected:
+      "bg-amber-800 text-white border-amber-700 shadow-md shadow-amber-900/20",
+    quizBanner:
+      "bg-gradient-to-r from-[#4a3728] to-[#2f2319] border-amber-900/40 text-amber-50 shadow-xl",
+    inputField:
+      "bg-[#faf6eb] border-[#d6cbb2] text-[#292524] focus:ring-amber-700",
+    questionCard: "bg-[#faf6eb] border-[#e6dec8]",
+    questionCardEditing:
+      "border-amber-700 ring-2 ring-amber-700/20 bg-amber-100/70",
+    iconBtn:
+      "bg-[#fffdf8] border-[#d6cbb2] hover:bg-[#f0e9d6] text-[#44403c]",
+    modalBox: "bg-[#fffdf8] border-[#e6dec8] text-[#292524] shadow-2xl",
   },
   "theme-dark": {
     mainBg: "bg-[#070b19] text-slate-100",
@@ -93,15 +116,27 @@ export default function ManageQuizzesPage() {
   const { user, isLoaded } = useUser();
   const { t } = useLanguage();
   const { theme } = useTheme();
-
   const styles =
     QUIZZES_PAGE_STYLES[theme] || QUIZZES_PAGE_STYLES["theme-classic"];
 
+  // Resolução centralizada do plano e cotas do usuário
+  const userRole =
+    user?.publicMetadata?.role ||
+    user?.unsafeMetadata?.role ||
+    "participant";
+  const planTier =
+    user?.publicMetadata?.plan_tier ||
+    user?.unsafeMetadata?.plan_tier ||
+    "free";
+  const userPlan = resolveUserPlan(userRole, planTier);
+
   const [quizzes, setQuizzes] = useState([]);
+  const [myQuizCount, setMyQuizCount] = useState(0);
   const [selectedQuiz, setSelectedQuiz] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [activeTab, setActiveTab] = useState("my");
   const [loading, setLoading] = useState(false);
+  const [savingQuestion, setSavingQuestion] = useState(false);
   const [togglingOfficial, setTogglingOfficial] = useState(false);
 
   const [newQuizTitle, setNewQuizTitle] = useState("");
@@ -111,6 +146,7 @@ export default function ManageQuizzesPage() {
   const [showQuizModal, setShowQuizModal] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [upgradeModalReason, setUpgradeModalReason] = useState("");
 
   // Format: "multiple_choice" | "fill_blanks" | "sequence_order" | "true_false"
   const [questionFormat, setQuestionFormat] = useState("multiple_choice");
@@ -139,8 +175,21 @@ export default function ManageQuizzesPage() {
   useEffect(() => {
     if (isLoaded) {
       fetchQuizzes();
+      fetchMyQuizzesTotal();
     }
   }, [user, activeTab, isLoaded]);
+
+  // Mantém contagem precisa de quizzes pessoais para validação de cota em qualquer aba
+  const fetchMyQuizzesTotal = async () => {
+    if (!user?.id) return;
+    const { count } = await supabase
+      .from("quizzes")
+      .select("id", { count: "exact", head: true })
+      .eq("created_by", user.id);
+    if (typeof count === "number") {
+      setMyQuizCount(count);
+    }
+  };
 
   const fetchQuizzes = async () => {
     setLoading(true);
@@ -160,8 +209,55 @@ export default function ManageQuizzesPage() {
     const { data, error } = await query;
     if (!error && data) {
       setQuizzes(data);
+      if (activeTab === "my") {
+        setMyQuizCount(data.length);
+      }
     }
     setLoading(false);
+  };
+
+  const canCreateAnotherQuiz = myQuizCount < userPlan.maxQuizzes;
+
+  const openCreateQuizWithQuotaCheck = () => {
+    if (!canCreateAnotherQuiz) {
+      setUpgradeModalReason(
+        `Você atingiu o limite de ${userPlan.maxQuizzes} questionários do plano ${userPlan.label}. Faça upgrade para criar mais questionários ou exclua um antigo.`
+      );
+      return;
+    }
+    setShowQuizModal(true);
+  };
+
+  const openAiModalWithQuotaCheck = () => {
+    if (!userPlan.canUseAiGenerator) {
+      setUpgradeModalReason(
+        `O Gerador de Questionários com IA não está disponível no plano ${userPlan.label}. Faça upgrade para o Aluno Pro ou Criador Pro para gerar questões automaticamente.`
+      );
+      return;
+    }
+    if (!canCreateAnotherQuiz) {
+      setUpgradeModalReason(
+        `Você já atingiu o limite de ${userPlan.maxQuizzes} questionários do plano ${userPlan.label}.`
+      );
+      return;
+    }
+    setShowAiModal(true);
+  };
+
+  const openImportModalWithQuotaCheck = () => {
+    if (!userPlan.canImportBulk) {
+      setUpgradeModalReason(
+        `A Importação em Lote de arquivos é exclusiva para assinantes Aluno Pro, Criador Pro e Institucional.`
+      );
+      return;
+    }
+    if (!canCreateAnotherQuiz) {
+      setUpgradeModalReason(
+        `Você já atingiu o limite de ${userPlan.maxQuizzes} questionários do plano ${userPlan.label}.`
+      );
+      return;
+    }
+    setShowImportModal(true);
   };
 
   const insertQuizDefensive = async (payload) => {
@@ -180,7 +276,6 @@ export default function ManageQuizzesPage() {
         .select()
         .single();
     }
-
     return result;
   };
 
@@ -188,8 +283,15 @@ export default function ManageQuizzesPage() {
     e.preventDefault();
     if (!newQuizTitle.trim()) return;
 
-    setLoading(true);
+    if (!canCreateAnotherQuiz) {
+      setShowQuizModal(false);
+      setUpgradeModalReason(
+        `Limite de ${userPlan.maxQuizzes} questionários atingido no plano ${userPlan.label}.`
+      );
+      return;
+    }
 
+    setLoading(true);
     const initialPayload = {
       title: newQuizTitle.trim(),
       category: newQuizCategory,
@@ -201,10 +303,10 @@ export default function ManageQuizzesPage() {
     };
 
     const { data, error } = await insertQuizDefensive(initialPayload);
-
     if (!error && data) {
       setActiveTab("my");
       setQuizzes((prev) => [data, ...prev]);
+      setMyQuizCount((prev) => prev + 1);
       setSelectedQuiz(data);
       setQuestions([]);
       setNewQuizTitle("");
@@ -214,6 +316,114 @@ export default function ManageQuizzesPage() {
       alert("Erro ao criar quiz: " + (error?.message || "Erro desconhecido"));
     }
     setLoading(false);
+  };
+
+  const handleSaveGeneratedQuiz = async ({ title, category, questions: draftQuestions }) => {
+    if (!user?.id || !userPlan.canUseAiGenerator || !canCreateAnotherQuiz) {
+      throw new Error("Sua conta ou seu plano não permite salvar outro quiz gerado.");
+    }
+    if (!title.trim() || !draftQuestions.length) {
+      throw new Error("Informe um título e revise as perguntas do quiz.");
+    }
+    if (draftQuestions.length > userPlan.maxQuestionsPerQuiz) {
+      throw new Error(`Seu plano permite até ${userPlan.maxQuestionsPerQuiz} questões por quiz.`);
+    }
+
+    const cleanText = (value) => typeof value === "string" ? value.trim() : "";
+    const cleanLines = (value) => Array.isArray(value) ? value.map(cleanText).filter(Boolean) : [];
+    const payloadQuestions = draftQuestions.map((question, index) => {
+      const questionText = cleanText(question.question);
+      const seconds = Number(question.time_seconds ?? 20);
+      const invalid = (message) => new Error(`Pergunta ${index + 1}. ${message}`);
+      if (!questionText || !Number.isSafeInteger(seconds) || seconds < 1) {
+        throw invalid("Informe o enunciado e um tempo inteiro positivo.");
+      }
+
+      let options;
+      let correctOption = 0;
+      switch (question.type) {
+        case "fill_blanks": {
+          const correctSequence = cleanLines(question.correctSequence);
+          const blankCount = (questionText.match(/___/g) || []).length;
+          if (!blankCount || blankCount !== correctSequence.length) {
+            throw invalid("Use ___ para cada lacuna e informe uma resposta por lacuna.");
+          }
+          const bank = [...new Set([...correctSequence, ...cleanLines(question.distractors)])]
+            .sort(() => Math.random() - 0.5);
+          options = { type: "fill_blanks", correctSequence, bank };
+          break;
+        }
+        case "sequence_order": {
+          const correctOrder = cleanLines(question.correctOrder);
+          if (correctOrder.length < 2 || new Set(correctOrder).size !== correctOrder.length) {
+            throw invalid("Informe pelo menos duas etapas distintas na ordem correta.");
+          }
+          options = { type: "sequence_order", correctOrder };
+          break;
+        }
+        case "true_false":
+          if (typeof question.isTrue !== "boolean") {
+            throw invalid("Selecione verdadeiro ou falso.");
+          }
+          correctOption = question.isTrue ? 0 : 1;
+          options = { type: "true_false", choices: ["Verdadeiro", "Falso"], correctIndex: correctOption };
+          break;
+        default: {
+          const choices = Array.isArray(question.options) ? question.options : [];
+          options = choices.map((choice) => cleanText(choice?.text));
+          if (options.length !== 4 || options.some((option) => !option) ||
+              choices.filter((choice) => choice?.is_correct === true).length !== 1) {
+            throw invalid("Preencha as quatro alternativas e marque exatamente uma como correta.");
+          }
+          correctOption = choices.findIndex((choice) => choice.is_correct === true);
+        }
+      }
+
+      return {
+        question_text: questionText,
+        options,
+        correct_option: correctOption,
+        time_seconds: seconds,
+        question_order: index + 1,
+      };
+    });
+
+    const { data: quiz, error: quizError } = await insertQuizDefensive({
+      title: title.trim(),
+      category,
+      created_by: user.id,
+      author_name: authorName,
+      is_public: false,
+      is_official: false,
+      is_arena_eligible: true,
+    });
+    if (quizError || !quiz) {
+      throw new Error("Falha ao criar o quiz. " + (quizError?.message || ""));
+    }
+
+    let persistedQuestions;
+    try {
+      const { data, error } = await supabase.from("questions")
+        .insert(payloadQuestions.map((question) => ({ ...question, quiz_id: quiz.id })))
+        .select("id, quiz_id, question_text, image_url, options, correct_option, time_seconds, question_order");
+      if (error) throw error;
+      persistedQuestions = data.sort((first, second) => first.question_order - second.question_order);
+    } catch (error) {
+      const cleanup = await supabase.from("quizzes").delete()
+        .eq("id", quiz.id).eq("created_by", user.id).select("id");
+      if (cleanup.error || !cleanup.data?.length) {
+        throw new Error("Falha ao salvar as perguntas. Confira se ficou um quiz incompleto antes de tentar novamente.");
+      }
+      throw new Error("Falha ao salvar as perguntas. " + error.message);
+    }
+
+    setMyQuizCount((previous) => previous + 1);
+    setActiveTab("my");
+    setQuizzes((previous) => [{ ...quiz, questions: persistedQuestions }, ...previous]);
+    setSelectedQuiz(quiz);
+    setQuestions(persistedQuestions);
+    setEditingQuestionId(null);
+    resetQuestionForm();
   };
 
   const handleSelectQuiz = async (quiz) => {
@@ -236,7 +446,6 @@ export default function ManageQuizzesPage() {
 
   const toggleShareQuiz = async (quiz) => {
     if (quiz.created_by !== currentUserId) return;
-
     const updatedStatus = !quiz.is_public;
     const { error } = await supabase
       .from("quizzes")
@@ -257,9 +466,12 @@ export default function ManageQuizzesPage() {
   };
 
   const handleToggleOfficialStatus = async (quiz) => {
+    if (!userPlan.canAccessOwnerPanel) {
+      alert("Apenas o proprietário da plataforma pode homologar quizzes oficiais.");
+      return;
+    }
     setTogglingOfficial(true);
     const newStatus = !quiz.is_official;
-
     try {
       const res = await fetch("/api/admin/toggle-official", {
         method: "POST",
@@ -269,9 +481,7 @@ export default function ManageQuizzesPage() {
           isOfficial: newStatus,
         }),
       });
-
       const json = await res.json();
-
       if (res.ok && json.success) {
         atualizarQuizNaLista(quiz.id, newStatus);
       } else {
@@ -279,7 +489,6 @@ export default function ManageQuizzesPage() {
           .from("quizzes")
           .update({ is_official: newStatus })
           .eq("id", quiz.id);
-
         if (!sbError) {
           atualizarQuizNaLista(quiz.id, newStatus);
         } else {
@@ -294,7 +503,6 @@ export default function ManageQuizzesPage() {
         .from("quizzes")
         .update({ is_official: newStatus })
         .eq("id", quiz.id);
-
       if (!sbError) {
         atualizarQuizNaLista(quiz.id, newStatus);
       } else {
@@ -310,11 +518,9 @@ export default function ManageQuizzesPage() {
       q.id === quizId ? { ...q, is_official: newStatus } : q
     );
     setQuizzes(updated);
-
     if (selectedQuiz?.id === quizId) {
       setSelectedQuiz({ ...selectedQuiz, is_official: newStatus });
     }
-
     alert(
       newStatus
         ? "⭐ Questionário homologado como OFICIAL DA ARENA com sucesso!"
@@ -323,8 +529,14 @@ export default function ManageQuizzesPage() {
   };
 
   const handleCloneQuiz = async (quizToClone) => {
-    setLoading(true);
+    if (!canCreateAnotherQuiz) {
+      setUpgradeModalReason(
+        `Você atingiu o limite de ${userPlan.maxQuizzes} questionários no plano ${userPlan.label}. Libere espaço ou faça upgrade para clonar quizzes.`
+      );
+      return;
+    }
 
+    setLoading(true);
     const clonePayload = {
       title: `${quizToClone.title} (Cópia)`,
       category: quizToClone.category || "Conhecimentos Gerais",
@@ -335,318 +547,180 @@ export default function ManageQuizzesPage() {
       is_arena_eligible: true,
     };
 
-    const { data: newQuiz, error: quizError } =
-      await insertQuizDefensive(clonePayload);
+    const { data: clonedQuiz, error: cloneErr } = await insertQuizDefensive(
+      clonePayload
+    );
 
-    if (quizError || !newQuiz) {
-      alert("Falha ao clonar quiz: " + (quizError?.message || ""));
-      setLoading(false);
-      return;
+    if (!cloneErr && clonedQuiz) {
+      const { data: sourceQuestions } = await supabase
+        .from("questions")
+        .select("*")
+        .eq("quiz_id", quizToClone.id)
+        .order("question_order", { ascending: true });
+
+      if (sourceQuestions && sourceQuestions.length > 0) {
+        // Respeita o limite de questões por quiz do plano ao clonar
+        const limitedQuestions = sourceQuestions.slice(
+          0,
+          userPlan.maxQuestionsPerQuiz === Infinity
+            ? sourceQuestions.length
+            : userPlan.maxQuestionsPerQuiz
+        );
+
+        const clonedQuestions = limitedQuestions.map((q, idx) => ({
+          quiz_id: clonedQuiz.id,
+          question_text: q.question_text,
+          image_url: q.image_url || null,
+          options: q.options,
+          correct_option: q.correct_option,
+          time_seconds: q.time_seconds || 20,
+          question_order: idx + 1,
+        }));
+
+        await supabase.from("questions").insert(clonedQuestions);
+      }
+
+      setMyQuizCount((prev) => prev + 1);
+      setActiveTab("my");
+      alert("📋 Questionário copiado para 'Meus Quizzes'!");
+    } else {
+      alert("Erro ao copiar questionário.");
     }
-
-    const { data: originalQuestions } = await supabase
-      .from("questions")
-      .select("*")
-      .eq("quiz_id", quizToClone.id);
-
-    if (originalQuestions && originalQuestions.length > 0) {
-      const clonedQuestionsPayload = originalQuestions.map((q) => ({
-        quiz_id: newQuiz.id,
-        question_text: q.question_text,
-        image_url: q.image_url || null,
-        options: q.options,
-        correct_option: q.correct_option,
-        time_seconds: q.time_seconds,
-        question_order: q.question_order,
-      }));
-
-      await supabase.from("questions").insert(clonedQuestionsPayload);
-    }
-
-    alert("Quiz clonado com sucesso para a aba 'Meus Quizzes'!");
-    setActiveTab("my");
-    setSelectedQuiz(newQuiz);
-    setQuizzes((prev) => [newQuiz, ...prev]);
-    handleSelectQuiz(newQuiz);
     setLoading(false);
   };
 
-  // Salvar ou Atualizar Pergunta nos 4 Formatos
   const handleSaveQuestion = async (e) => {
     e.preventDefault();
+    if (!selectedQuiz || !questionText.trim()) return;
 
-    if (!selectedQuiz || selectedQuiz.created_by !== currentUserId) {
-      alert("Apenas pode editar questionários que você mesmo criou.");
-      return;
-    }
-
-    if (!questionText.trim()) {
-      alert("Preencha o enunciado da pergunta.");
-      return;
-    }
-
-    let finalOptionsPayload = options;
-    let finalCorrectOption = Number(correctOption);
-
-    if (questionFormat === "fill_blanks") {
-      const blanksInText = (questionText.match(/___/g) || []).length;
-      const correctWords = correctBlanksText
-        .split(",")
-        .map((w) => w.trim())
-        .filter(Boolean);
-      const distractorWords = distractorBlanksText
-        .split(",")
-        .map((w) => w.trim())
-        .filter(Boolean);
-
-      if (blanksInText === 0) {
-        alert(
-          "Use '___' (três underlines) no enunciado para marcar onde ficarão as lacunas!"
-        );
-        return;
-      }
-
-      if (correctWords.length !== blanksInText) {
-        alert(
-          `O enunciado possui ${blanksInText} lacuna(s) '___', mas você informou ${correctWords.length} palavra(s) correta(s).`
-        );
-        return;
-      }
-
-      finalOptionsPayload = {
-        type: "fill_blanks",
-        correctSequence: correctWords,
-        bank: [...correctWords, ...distractorWords],
-      };
-      finalCorrectOption = 0;
-    } else if (questionFormat === "sequence_order") {
-      const validSteps = sequenceSteps.map((s) => s.trim()).filter(Boolean);
-      if (validSteps.length < 3) {
-        alert("Informe pelo menos 3 etapas na ordem cronológica/lógica exata.");
-        return;
-      }
-
-      finalOptionsPayload = {
-        type: "sequence_order",
-        correctOrder: validSteps,
-      };
-      finalCorrectOption = 0;
-    } else if (questionFormat === "true_false") {
-      finalOptionsPayload = {
-        type: "true_false",
-        choices: ["Verdadeiro", "Falso"],
-        correctIndex: Number(trueFalseAnswer),
-      };
-      finalCorrectOption = Number(trueFalseAnswer);
-    } else {
-      if (options.some((opt) => !opt.trim())) {
-        alert(t("err_fill_options") || "Preencha todas as 4 opções.");
-        return;
-      }
-    }
-
-    setLoading(true);
-    const sanitizedImageUrl = imageUrl.trim() ? imageUrl.trim() : null;
-
-    if (editingQuestionId) {
-      const { data, error } = await supabase
-        .from("questions")
-        .update({
-          question_text: questionText.trim(),
-          image_url: sanitizedImageUrl,
-          options: finalOptionsPayload,
-          correct_option: finalCorrectOption,
-          time_seconds: Number(timeSeconds),
-        })
-        .eq("id", editingQuestionId)
-        .select()
-        .single();
-
-      if (!error && data) {
-        setQuestions((prev) =>
-          prev.map((q) => (q.id === editingQuestionId ? data : q))
-        );
-        resetQuestionForm();
-      } else {
-        alert("Erro ao atualizar pergunta: " + (error?.message || ""));
-      }
-    } else {
-      const nextOrder = questions.length + 1;
-      const { data, error } = await supabase
-        .from("questions")
-        .insert({
-          quiz_id: selectedQuiz.id,
-          question_text: questionText.trim(),
-          image_url: sanitizedImageUrl,
-          options: finalOptionsPayload,
-          correct_option: finalCorrectOption,
-          time_seconds: Number(timeSeconds),
-          question_order: nextOrder,
-        })
-        .select()
-        .single();
-
-      if (!error && data) {
-        setQuestions((prev) => [...prev, data]);
-        resetQuestionForm();
-      } else {
-        alert("Erro ao adicionar pergunta: " + (error?.message || ""));
-      }
-    }
-
-    setLoading(false);
-  };
-
-const handleQuizGeneratedByAi = async (aiData) => {
-    if (!aiData?.questions || aiData.questions.length === 0) return;
-
-    setLoading(true);
-    let targetQuizId = selectedQuiz?.id;
-
-    if (!targetQuizId || selectedQuiz?.created_by !== currentUserId) {
-      const resolvedCat = aiData.category || "Conhecimentos Gerais";
-
-      const aiQuizPayload = {
-        title: aiData.title || "Novo Quiz com IA",
-        category: resolvedCat,
-        created_by: currentUserId,
-        author_name: authorName,
-        is_public: false,
-        is_official: false,
-        is_arena_eligible: true,
-      };
-
-      const { data: newQuiz, error: quizErr } =
-        await insertQuizDefensive(aiQuizPayload);
-
-      if (quizErr || !newQuiz) {
-        alert("Erro ao criar quiz gerado: " + (quizErr?.message || ""));
-        setLoading(false);
-        return;
-      }
-
-      targetQuizId = newQuiz.id;
-      setActiveTab("my");
-      setSelectedQuiz(newQuiz);
-      setQuizzes((prev) => [newQuiz, ...prev]);
-    }
-
-    const startingOrder =
-      selectedQuiz?.created_by === currentUserId ? questions.length : 0;
-
-    const questionsToInsert = aiData.questions.map((q, idx) => {
-      const qType = q.type || "multiple_choice";
-
-      if (qType === "fill_blanks") {
-        const seq = Array.isArray(q.correctSequence) ? q.correctSequence : [];
-        const distractors = Array.isArray(q.distractors) ? q.distractors : [];
-        return {
-          quiz_id: targetQuizId,
-          question_text: q.question,
-          image_url: null,
-          options: {
-            type: "fill_blanks",
-            correctSequence: seq,
-            bank: [...seq, ...distractors],
-          },
-          correct_option: 0,
-          time_seconds: q.time_seconds || 25,
-          question_order: startingOrder + idx + 1,
-        };
-      }
-
-      if (qType === "sequence_order") {
-        const order = Array.isArray(q.correctOrder) ? q.correctOrder : [];
-        return {
-          quiz_id: targetQuizId,
-          question_text: q.question,
-          image_url: null,
-          options: {
-            type: "sequence_order",
-            correctOrder: order,
-          },
-          correct_option: 0,
-          time_seconds: q.time_seconds || 30,
-          question_order: startingOrder + idx + 1,
-        };
-      }
-
-      if (qType === "true_false") {
-        const correctIdx = q.isTrue === false ? 1 : 0;
-        return {
-          quiz_id: targetQuizId,
-          question_text: q.question,
-          image_url: null,
-          options: {
-            type: "true_false",
-            choices: ["Verdadeiro", "Falso"],
-            correctIndex: correctIdx,
-          },
-          correct_option: correctIdx,
-          time_seconds: q.time_seconds || 15,
-          question_order: startingOrder + idx + 1,
-        };
-      }
-
-      const optsList = Array.isArray(q.options) ? q.options : [];
-      const correctIdx = optsList.findIndex((opt) => opt.is_correct === true);
-      return {
-        quiz_id: targetQuizId,
-        question_text: q.question,
-        image_url: null,
-        options: optsList.map((opt) =>
-          typeof opt === "string" ? opt : opt.text
-        ),
-        correct_option: correctIdx >= 0 ? correctIdx : 0,
-        time_seconds: q.time_seconds || 20,
-        question_order: startingOrder + idx + 1,
-      };
-    });
-
-    const { data: insertedQuestions, error: insertErr } = await supabase
-      .from("questions")
-      .insert(questionsToInsert)
-      .select();
-
-    if (!insertErr && insertedQuestions) {
-      setQuestions((prev) =>
-        selectedQuiz?.created_by === currentUserId
-          ? [...prev, ...insertedQuestions]
-          : insertedQuestions
+    // Trava de limite de questões por quiz apenas ao ADICIONAR nova questão
+    if (
+      !editingQuestionId &&
+      questions.length >= userPlan.maxQuestionsPerQuiz
+    ) {
+      setUpgradeModalReason(
+        `Você atingiu o limite de ${userPlan.maxQuestionsPerQuiz} questões por quiz do plano ${userPlan.label}. Faça upgrade para adicionar mais questões.`
       );
-      fetchQuizzes();
-    } else if (insertErr) {
-      alert("Erro ao salvar questões da IA: " + insertErr.message);
+      return;
     }
 
-    setLoading(false);
-  };
+    setSavingQuestion(true);
+    try {
+      let structuredOptions = null;
+      let resolvedCorrectOption = 0;
 
-  const handleImportComplete = async (newQuiz) => {
-    setActiveTab("my");
-    setSelectedQuiz(newQuiz);
-    setQuizzes((prev) => [newQuiz, ...prev.filter((q) => q.id !== newQuiz.id)]);
+      if (questionFormat === "fill_blanks") {
+        const correctSequence = correctBlanksText
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const distractors = distractorBlanksText
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
 
-    const { data: freshQuestions } = await supabase
-      .from("questions")
-      .select(
-        "id, quiz_id, question_text, image_url, options, correct_option, time_seconds, question_order"
-      )
-      .eq("quiz_id", newQuiz.id)
-      .order("question_order", { ascending: true });
+        if (correctSequence.length === 0) {
+          alert(
+            "Informe ao menos uma palavra correta separada por vírgula para preencher as lacunas (___)."
+          );
+          setSavingQuestion(false);
+          return;
+        }
 
-    setQuestions(freshQuestions || []);
-    resetQuestionForm();
-    alert("Questionário e acervo integrados com sucesso!");
+        const bank = Array.from(
+          new Set([...correctSequence, ...distractors])
+        ).sort(() => Math.random() - 0.5);
+
+        structuredOptions = {
+          type: "fill_blanks",
+          correctSequence,
+          bank,
+        };
+        resolvedCorrectOption = 0;
+      } else if (questionFormat === "sequence_order") {
+        const validSteps = sequenceSteps.map((s) => s.trim()).filter(Boolean);
+        if (validSteps.length < 2) {
+          alert("Informe pelo menos 2 etapas em ordem para a sequência.");
+          setSavingQuestion(false);
+          return;
+        }
+        structuredOptions = {
+          type: "sequence_order",
+          correctOrder: validSteps,
+        };
+        resolvedCorrectOption = 0;
+      } else if (questionFormat === "true_false") {
+        structuredOptions = {
+          type: "true_false",
+          choices: ["Verdadeiro", "Falso"],
+          correctIndex: Number(trueFalseAnswer),
+        };
+        resolvedCorrectOption = Number(trueFalseAnswer);
+      } else {
+        const cleanOptions = options.map((o) => o.trim());
+        if (cleanOptions.some((o) => !o)) {
+          alert("Preencha todas as 4 alternativas da questão.");
+          setSavingQuestion(false);
+          return;
+        }
+        structuredOptions = cleanOptions;
+        resolvedCorrectOption = Number(correctOption);
+      }
+
+      const payload = {
+        quiz_id: selectedQuiz.id,
+        question_text: questionText.trim(),
+        image_url: imageUrl.trim() || null,
+        options: structuredOptions,
+        correct_option: resolvedCorrectOption,
+        time_seconds: Number(timeSeconds) || 20,
+      };
+
+      if (editingQuestionId) {
+        const { data, error } = await supabase
+          .from("questions")
+          .update(payload)
+          .eq("id", editingQuestionId)
+          .select()
+          .single();
+
+        if (!error && data) {
+          setQuestions((prev) =>
+            prev.map((q) => (q.id === editingQuestionId ? data : q))
+          );
+          resetQuestionForm();
+        } else {
+          alert("Erro ao atualizar questão: " + error?.message);
+        }
+      } else {
+        const { data, error } = await supabase
+          .from("questions")
+          .insert({
+            ...payload,
+            question_order: questions.length + 1,
+          })
+          .select()
+          .single();
+
+        if (!error && data) {
+          setQuestions((prev) => [...prev, data]);
+          resetQuestionForm();
+        } else {
+          alert("Erro ao salvar questão: " + error?.message);
+        }
+      }
+    } finally {
+      setSavingQuestion(false);
+    }
   };
 
   const handleEditQuestion = (q) => {
     setEditingQuestionId(q.id);
     setQuestionText(q.question_text || "");
-    setImageUrl(q.image_url ? String(q.image_url).trim() : "");
+    setImageUrl(q.image_url || "");
     setTimeSeconds(q.time_seconds || 20);
 
-    if (q.options && !Array.isArray(q.options)) {
+    if (q.options && typeof q.options === "object" && !Array.isArray(q.options)) {
       if (q.options.type === "fill_blanks") {
         setQuestionFormat("fill_blanks");
         const seq = q.options.correctSequence || [];
@@ -658,7 +732,9 @@ const handleQuizGeneratedByAi = async (aiData) => {
         setQuestionFormat("sequence_order");
         const steps = q.options.correctOrder || ["", "", "", ""];
         setSequenceSteps(
-          steps.length >= 4 ? steps : [...steps, ...Array(4 - steps.length).fill("")]
+          steps.length >= 4
+            ? steps
+            : [...steps, ...Array(4 - steps.length).fill("")]
         );
       } else if (q.options.type === "true_false") {
         setQuestionFormat("true_false");
@@ -701,6 +777,7 @@ const handleQuizGeneratedByAi = async (aiData) => {
     if (!confirm(t("confirm_del_quiz") || "Deseja eliminar este quiz?")) return;
     await supabase.from("quizzes").delete().eq("id", quizId);
     setQuizzes((prev) => prev.filter((q) => q.id !== quizId));
+    setMyQuizCount((prev) => Math.max(0, prev - 1));
     if (selectedQuiz?.id === quizId) {
       setSelectedQuiz(null);
       setQuestions([]);
@@ -708,18 +785,34 @@ const handleQuizGeneratedByAi = async (aiData) => {
   };
 
   const isCreatorOfQuiz = selectedQuiz?.created_by === currentUserId;
+  const isQuestionQuotaReached =
+    !editingQuestionId && questions.length >= userPlan.maxQuestionsPerQuiz;
 
   return (
     <div
-      className={`min-h-[calc(100vh-70px)] font-sans transition-colors duration-300 ${styles.mainBg}`}
+      className={`min-h-[calc(100vh-70px)] px-4 sm:px-6 py-8 font-sans transition-colors duration-300 ${styles.mainBg}`}
     >
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-          <div>
-            <h1 className="text-3xl font-extrabold flex items-center gap-2">
-              <span>📚</span> Banco de Questões & Quizzes
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Cabeçalho + Barra de Cota do Plano Atual */}
+        <div
+          className={`border rounded-3xl p-5 md:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${styles.cardPanel}`}
+        >
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-500 border border-indigo-500/25">
+                Plano: {userPlan.label}
+              </span>
+              <span className="text-xs font-bold opacity-75">
+                • Quizzes: {myQuizCount} / {formatLimitValue(userPlan.maxQuizzes)}
+              </span>
+              <span className="text-xs font-bold opacity-75">
+                • Máx. Questões/Quiz: {formatLimitValue(userPlan.maxQuestionsPerQuiz)}
+              </span>
+            </div>
+            <h1 className="text-2xl md:text-3xl font-black tracking-tight">
+              📚 Banco de Questões & Quizzes
             </h1>
-            <p className="text-sm font-medium opacity-70 mt-1">
+            <p className="text-xs opacity-75">
               Crie questões de Múltipla Escolha, Completar Lacunas, Ordenação
               Sequencial ou Verdadeiro/Falso.
             </p>
@@ -728,18 +821,26 @@ const handleQuizGeneratedByAi = async (aiData) => {
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={() => setShowImportModal(true)}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-4 rounded-xl transition text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-indigo-600/20"
+              onClick={openImportModalWithQuotaCheck}
+              className={`font-semibold py-2.5 px-4 rounded-xl transition text-xs flex items-center gap-2 cursor-pointer shadow-lg ${
+                userPlan.canImportBulk
+                  ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20"
+                  : "bg-slate-500/20 text-current opacity-80 border border-slate-500/30 hover:opacity-100"
+              }`}
             >
-              <span>📥</span> Importar Arquivo
+              <span>{userPlan.canImportBulk ? "📥" : "🔒"}</span> Importar Arquivo
             </button>
 
             <button
               type="button"
-              onClick={() => setShowAiModal(true)}
-              className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold py-2.5 px-4 rounded-xl transition text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-purple-600/20"
+              onClick={openAiModalWithQuotaCheck}
+              className={`font-semibold py-2.5 px-4 rounded-xl transition text-xs flex items-center gap-2 cursor-pointer shadow-lg ${
+                userPlan.canUseAiGenerator
+                  ? "bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-purple-600/20"
+                  : "bg-slate-500/20 text-current opacity-80 border border-slate-500/30 hover:opacity-100"
+              }`}
             >
-              <span>✨</span> Gerar com IA
+              <span>{userPlan.canUseAiGenerator ? "✨" : "🔒"}</span> Gerar com IA
             </button>
 
             <Link
@@ -751,10 +852,15 @@ const handleQuizGeneratedByAi = async (aiData) => {
 
             <button
               type="button"
-              onClick={() => setShowQuizModal(true)}
-              className="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-2.5 px-4 rounded-xl transition text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/20"
+              onClick={openCreateQuizWithQuotaCheck}
+              className={`font-semibold py-2.5 px-4 rounded-xl transition text-xs flex items-center gap-2 cursor-pointer shadow-lg ${
+                canCreateAnotherQuiz
+                  ? "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20"
+                  : "bg-amber-500 hover:bg-amber-600 text-slate-950 shadow-amber-500/20"
+              }`}
             >
-              ➕ {t("create_new_quiz") || "Novo Quiz"}
+              {canCreateAnotherQuiz ? "➕" : "🔒"}{" "}
+              {t("create_new_quiz") || "Novo Quiz"}
             </button>
           </div>
         </div>
@@ -781,7 +887,6 @@ const handleQuizGeneratedByAi = async (aiData) => {
               >
                 Meus Quizzes
               </button>
-
               <button
                 type="button"
                 onClick={() => {
@@ -796,7 +901,6 @@ const handleQuizGeneratedByAi = async (aiData) => {
               >
                 Comunidade
               </button>
-
               <button
                 type="button"
                 onClick={() => {
@@ -942,8 +1046,7 @@ const handleQuizGeneratedByAi = async (aiData) => {
                               }`}
                         </span>
                         <span className="bg-black/25 border border-white/20 text-purple-100 px-2 py-0.5 rounded-full text-[10px] font-bold">
-                          📂{" "}
-                          {selectedQuiz.category || "Conhecimentos Gerais"}
+                          📂 {selectedQuiz.category || "Conhecimentos Gerais"}
                         </span>
                         {selectedQuiz.is_official && (
                           <span className="bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1 shadow">
@@ -957,47 +1060,52 @@ const handleQuizGeneratedByAi = async (aiData) => {
                     </div>
 
                     <span className="bg-amber-400 text-slate-950 px-3.5 py-1.5 rounded-full text-xs font-black shadow flex-shrink-0">
-                      {questions.length} questões
+                      {questions.length} /{" "}
+                      {formatLimitValue(userPlan.maxQuestionsPerQuiz)} questões
                     </span>
                   </div>
 
                   <div className="pt-3 border-t border-white/20 flex items-center gap-3 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => handleToggleOfficialStatus(selectedQuiz)}
-                      disabled={togglingOfficial}
-                      className={`px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer shadow-lg border ${
-                        selectedQuiz.is_official
-                          ? "bg-rose-600 border-rose-500 text-white hover:bg-rose-500"
-                          : "bg-amber-400 border-amber-300 text-slate-950 hover:bg-amber-300 shadow-amber-400/25"
-                      } disabled:opacity-50`}
-                    >
-                      {togglingOfficial ? (
-                        "A sincronizar..."
-                      ) : selectedQuiz.is_official ? (
-                        <>
-                          <span>❌</span> Revogar Status Oficial
-                        </>
-                      ) : (
-                        <>
-                          <span>⭐</span> Homologar como Oficial (Arena)
-                        </>
-                      )}
-                    </button>
+                    {userPlan.canAccessOwnerPanel && (
+                      <button
+                        type="button"
+                        onClick={() => handleToggleOfficialStatus(selectedQuiz)}
+                        disabled={togglingOfficial}
+                        className={`px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer shadow-lg border ${
+                          selectedQuiz.is_official
+                            ? "bg-rose-600 border-rose-500 text-white hover:bg-rose-500"
+                            : "bg-amber-400 border-amber-300 text-slate-950 hover:bg-amber-300 shadow-amber-400/25"
+                        } disabled:opacity-50`}
+                      >
+                        {togglingOfficial ? (
+                          "A sincronizar..."
+                        ) : selectedQuiz.is_official ? (
+                          <>
+                            <span>❌</span> Revogar Status Oficial
+                          </>
+                        ) : (
+                          <>
+                            <span>⭐</span> Homologar como Oficial (Arena)
+                          </>
+                        )}
+                      </button>
+                    )}
 
-                    <button
-                      type="button"
-                      onClick={() => toggleShareQuiz(selectedQuiz)}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm border ${
-                        selectedQuiz.is_public
-                          ? "bg-emerald-500/20 border-emerald-400 text-emerald-200 hover:bg-emerald-500/30"
-                          : "bg-slate-900/70 border-white/20 text-slate-200 hover:bg-slate-800"
-                      }`}
-                    >
-                      <span>
-                        {selectedQuiz.is_public ? "🌐 Público" : "🔒 Privado"}
-                      </span>
-                    </button>
+                    {isCreatorOfQuiz && (
+                      <button
+                        type="button"
+                        onClick={() => toggleShareQuiz(selectedQuiz)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm border ${
+                          selectedQuiz.is_public
+                            ? "bg-emerald-500/20 border-emerald-400 text-emerald-200 hover:bg-emerald-500/30"
+                            : "bg-slate-900/70 border-white/20 text-slate-200 hover:bg-slate-800"
+                        }`}
+                      >
+                        <span>
+                          {selectedQuiz.is_public ? "🌐 Público" : "🔒 Privado"}
+                        </span>
+                      </button>
+                    )}
 
                     <Link
                       href={`/game/host?quizId=${selectedQuiz.id}`}
@@ -1014,7 +1122,7 @@ const handleQuizGeneratedByAi = async (aiData) => {
                     className={`border rounded-3xl p-6 space-y-6 transition-colors duration-300 ${styles.cardPanel}`}
                   >
                     <div className="space-y-3 border-b border-inherit pb-4">
-                      <div className="flex justify-between items-center">
+                      <div className="flex justify-between items-center flex-wrap gap-2">
                         <h3 className="text-md font-bold flex items-center gap-2">
                           {editingQuestionId ? (
                             <>
@@ -1026,447 +1134,302 @@ const handleQuizGeneratedByAi = async (aiData) => {
                             </>
                           )}
                         </h3>
-
                         {editingQuestionId && (
                           <button
                             type="button"
                             onClick={resetQuestionForm}
-                            className="text-xs text-purple-500 font-bold hover:underline cursor-pointer"
+                            className="text-xs font-bold text-rose-500 hover:underline cursor-pointer"
                           >
-                            Cancelar edição
+                            Cancelar Edição
                           </button>
                         )}
                       </div>
 
-                      {/* Barra de Seleção dos 4 Formatos */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setQuestionFormat("multiple_choice")}
-                          className={`px-3 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                            questionFormat === "multiple_choice"
-                              ? "bg-purple-600 text-white border-purple-500 shadow"
-                              : styles.questionCard
-                          }`}
-                        >
-                          🔘 Múltipla Escolha
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setQuestionFormat("fill_blanks")}
-                          className={`px-3 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                            questionFormat === "fill_blanks"
-                              ? "bg-amber-500 text-slate-950 border-amber-400 shadow"
-                              : styles.questionCard
-                          }`}
-                        >
-                          🧩 Completar Lacunas
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setQuestionFormat("sequence_order")}
-                          className={`px-3 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                            questionFormat === "sequence_order"
-                              ? "bg-indigo-600 text-white border-indigo-500 shadow"
-                              : styles.questionCard
-                          }`}
-                        >
-                          🔀 Ordenar Sequência
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setQuestionFormat("true_false");
-                            setTimeSeconds(10);
-                          }}
-                          className={`px-3 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                            questionFormat === "true_false"
-                              ? "bg-emerald-600 text-white border-emerald-500 shadow"
-                              : styles.questionCard
-                          }`}
-                        >
-                          ⚡ Verdadeiro / Falso
-                        </button>
+                      {isQuestionQuotaReached && (
+                        <div className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <p className="text-xs font-bold text-amber-600 dark:text-amber-300">
+                            🔒 Limite de {userPlan.maxQuestionsPerQuiz} questões
+                            atingido neste quiz ({userPlan.label}).
+                          </p>
+                          <Link
+                            href="/planos"
+                            className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs text-center"
+                          >
+                            Ampliar Limite →
+                          </Link>
+                        </div>
+                      )}
+
+                      {/* Seletor dos 4 Formatos */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                        {[
+                          { id: "multiple_choice", label: "🔘 Múltipla Escolha" },
+                          { id: "fill_blanks", label: "🧩 Completar Lacunas" },
+                          { id: "sequence_order", label: "🔢 Ordenar Etapas" },
+                          { id: "true_false", label: "⚡ Verdadeiro / Falso" },
+                        ].map((fmt) => (
+                          <button
+                            key={fmt.id}
+                            type="button"
+                            onClick={() => setQuestionFormat(fmt.id)}
+                            className={`py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                              questionFormat === fmt.id
+                                ? "bg-indigo-600 text-white border-indigo-500 shadow"
+                                : styles.iconBtn
+                            }`}
+                          >
+                            {fmt.label}
+                          </button>
+                        ))}
                       </div>
                     </div>
 
                     <form onSubmit={handleSaveQuestion} className="space-y-4">
                       <div>
-                        <label className="text-xs font-bold opacity-80 block mb-1.5">
+                        <label className="block text-xs font-bold mb-1.5 opacity-80">
                           {questionFormat === "fill_blanks"
-                            ? "Frase com Lacunas (use ___ onde o aluno deve preencher)"
-                            : questionFormat === "sequence_order"
-                            ? "Comando da Ordenação (Ex.: Ordene as etapas da abordagem)"
-                            : "Enunciado da Pergunta"}
+                            ? "Frase com lacunas (use ___ para cada espaço a preencher):"
+                            : "Enunciado da Questão:"}
                         </label>
-                        <input
-                          type="text"
-                          placeholder={
-                            questionFormat === "fill_blanks"
-                              ? "Ex.: O condutor deve manter ___ de segurança e respeitar o ___ da via."
-                              : questionFormat === "sequence_order"
-                              ? "Ex.: Coloque na ordem correta os passos de sinalização de emergência:"
-                              : questionFormat === "true_false"
-                              ? "Ex.: A ultrapassagem pela direita é permitida quando o veículo à frente sinaliza conversão à esquerda."
-                              : "Ex.: Qual é o significado da placa ilustrada?"
-                          }
+                        <textarea
+                          required
+                          rows={2}
                           value={questionText}
                           onChange={(e) => setQuestionText(e.target.value)}
-                          className={`w-full border rounded-xl p-3 text-sm focus:outline-none focus:ring-2 font-medium ${styles.inputField}`}
+                          placeholder={
+                            questionFormat === "fill_blanks"
+                              ? "Ex: A capital do Brasil é ___ e fica localizada na região ___."
+                              : "Digite a pergunta aqui..."
+                          }
+                          className={`w-full px-4 py-3 rounded-2xl border text-sm outline-none focus:ring-2 ${styles.inputField}`}
                         />
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div className="sm:col-span-2">
-                          <label className="text-xs font-bold opacity-80 block mb-1.5">
-                            URL da Imagem Ilustrativa (Opcional)
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold mb-1.5 opacity-80">
+                            URL da Imagem (Opcional):
                           </label>
                           <input
-                            type="text"
-                            placeholder="https://exemplo.com/imagem.png"
+                            type="url"
                             value={imageUrl}
                             onChange={(e) => setImageUrl(e.target.value)}
-                            className={`w-full border rounded-xl p-3 text-xs focus:outline-none focus:ring-2 font-mono ${styles.inputField}`}
+                            placeholder="https://..."
+                            className={`w-full px-4 py-2.5 rounded-xl border text-xs outline-none focus:ring-2 ${styles.inputField}`}
                           />
                         </div>
-
                         <div>
-                          <label className="text-xs font-bold opacity-80 block mb-1.5">
-                            Tempo Limite
+                          <label className="block text-xs font-bold mb-1.5 opacity-80">
+                            Tempo Limite (segundos):
                           </label>
-                          <select
+                          <input
+                            type="number"
+                            min={5}
+                            max={180}
                             value={timeSeconds}
                             onChange={(e) => setTimeSeconds(e.target.value)}
-                            className={`w-full border font-bold rounded-xl p-3 text-xs focus:outline-none focus:ring-2 cursor-pointer ${styles.inputField}`}
-                          >
-                            <option value={10}>10 segundos (Relâmpago)</option>
-                            <option value={15}>15 segundos</option>
-                            <option value={20}>20 segundos</option>
-                            <option value={30}>30 segundos</option>
-                            <option value={45}>45 segundos</option>
-                            <option value={60}>60 segundos</option>
-                          </select>
+                            className={`w-full px-4 py-2.5 rounded-xl border text-xs outline-none focus:ring-2 ${styles.inputField}`}
+                          />
                         </div>
                       </div>
 
-                      {imageUrl.trim().length > 0 && (
-                        <div
-                          className={`p-3 border rounded-2xl flex items-center gap-3 ${styles.questionCard}`}
-                        >
-                          <img
-                            src={imageUrl}
-                            alt="Prévia da Questão"
-                            className="w-16 h-16 rounded-xl object-contain border border-slate-700 bg-slate-900"
-                            onError={(e) => {
-                              e.currentTarget.style.display = "none";
-                            }}
-                            onLoad={(e) => {
-                              e.currentTarget.style.display = "block";
-                            }}
-                          />
-                          <div className="text-xs truncate flex-1">
-                            <span className="font-bold text-purple-500 block">
-                              Prévia da Imagem Carregada
-                            </span>
-                            <span className="opacity-60 text-[11px] font-mono truncate block">
-                              {imageUrl}
-                            </span>
-                          </div>
+                      {/* Campos específicos por formato */}
+                      {questionFormat === "multiple_choice" && (
+                        <div className="space-y-2.5">
+                          <label className="block text-xs font-bold opacity-80">
+                            Alternativas (marque a bolinha da resposta correta):
+                          </label>
+                          {options.map((opt, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                name="correctOption"
+                                checked={Number(correctOption) === idx}
+                                onChange={() => setCorrectOption(idx)}
+                                className="w-4 h-4 accent-emerald-500 cursor-pointer"
+                              />
+                              <input
+                                type="text"
+                                required
+                                value={opt}
+                                onChange={(e) => {
+                                  const next = [...options];
+                                  next[idx] = e.target.value;
+                                  setOptions(next);
+                                }}
+                                placeholder={`Alternativa ${String.fromCharCode(
+                                  65 + idx
+                                )}`}
+                                className={`flex-1 px-4 py-2.5 rounded-xl border text-xs outline-none focus:ring-2 ${styles.inputField}`}
+                              />
+                            </div>
+                          ))}
                         </div>
                       )}
 
-                      {/* FORMATO 1: COMPLETAR LACUNAS */}
                       {questionFormat === "fill_blanks" && (
-                        <div className="space-y-4 pt-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="text-xs font-bold text-emerald-500 block mb-1.5">
-                              ✅ Palavras Corretas na Sequência Exata (separadas
-                              por vírgula):
+                            <label className="block text-xs font-bold mb-1.5 opacity-80">
+                              Palavras Corretas na Ordem (separadas por vírgula):
                             </label>
                             <input
                               type="text"
-                              placeholder="Ex.: distância, limite"
+                              required
                               value={correctBlanksText}
                               onChange={(e) =>
                                 setCorrectBlanksText(e.target.value)
                               }
-                              className={`w-full border rounded-xl p-3 text-sm font-bold focus:outline-none focus:ring-2 ${styles.inputField}`}
+                              placeholder="Ex: Brasília, Centro-Oeste"
+                              className={`w-full px-4 py-2.5 rounded-xl border text-xs outline-none focus:ring-2 ${styles.inputField}`}
                             />
                           </div>
-
                           <div>
-                            <label className="text-xs font-bold text-amber-500 block mb-1.5">
-                              🧩 Palavras Distratoras Extras no Banco (opcional,
-                              separadas por vírgula):
+                            <label className="block text-xs font-bold mb-1.5 opacity-80">
+                              Palavras Distratoras Extras (opcional):
                             </label>
                             <input
                               type="text"
-                              placeholder="Ex.: ultrapassagem, farol, acostamento"
                               value={distractorBlanksText}
                               onChange={(e) =>
                                 setDistractorBlanksText(e.target.value)
                               }
-                              className={`w-full border rounded-xl p-3 text-sm font-medium focus:outline-none focus:ring-2 ${styles.inputField}`}
+                              placeholder="Ex: Salvador, Sudeste"
+                              className={`w-full px-4 py-2.5 rounded-xl border text-xs outline-none focus:ring-2 ${styles.inputField}`}
                             />
                           </div>
                         </div>
                       )}
 
-                      {/* FORMATO 2: ORDENAÇÃO SEQUENCIAL */}
                       {questionFormat === "sequence_order" && (
-                        <div className="space-y-3 pt-2">
-                          <label className="text-xs font-bold text-indigo-400 block">
-                            🔀 Informe as etapas na ORDEM CORRETA (o sistema
-                            embaralhará automaticamente para o aluno):
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold opacity-80">
+                            Etapas na Ordem Cronológica/Lógica Correta:
                           </label>
-                          <div className="space-y-2.5">
-                            {sequenceSteps.map((step, idx) => (
-                              <div
-                                key={idx}
-                                className={`flex items-center gap-3 p-2.5 rounded-xl border ${styles.questionCard}`}
-                              >
-                                <span className="w-7 h-7 rounded-lg bg-indigo-600 text-white font-mono text-xs font-black flex items-center justify-center flex-shrink-0">
-                                  {idx + 1}º
-                                </span>
-                                <input
-                                  type="text"
-                                  placeholder={`Etapa ${idx + 1} ${
-                                    idx === 3 ? "(opcional)" : ""
-                                  }`}
-                                  value={step}
-                                  onChange={(e) => {
-                                    const updated = [...sequenceSteps];
-                                    updated[idx] = e.target.value;
-                                    setSequenceSteps(updated);
-                                  }}
-                                  className="w-full bg-transparent text-sm font-semibold focus:outline-none"
-                                />
-                              </div>
-                            ))}
-                          </div>
+                          {sequenceSteps.map((step, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-500 font-black text-xs flex items-center justify-center">
+                                {idx + 1}
+                              </span>
+                              <input
+                                type="text"
+                                value={step}
+                                onChange={(e) => {
+                                  const next = [...sequenceSteps];
+                                  next[idx] = e.target.value;
+                                  setSequenceSteps(next);
+                                }}
+                                placeholder={`Passo ${idx + 1}`}
+                                className={`flex-1 px-4 py-2 rounded-xl border text-xs outline-none focus:ring-2 ${styles.inputField}`}
+                              />
+                            </div>
+                          ))}
                         </div>
                       )}
 
-                      {/* FORMATO 3: VERDADEIRO OU FALSO RELÂMPAGO */}
                       {questionFormat === "true_false" && (
-                        <div className="space-y-2 pt-2">
-                          <label className="text-xs font-bold opacity-80 block">
-                            ⚡ Selecione o gabarito da afirmação:
-                          </label>
-                          <div className="grid grid-cols-2 gap-3">
+                        <div className="flex gap-3">
+                          {[
+                            { val: 0, label: "✅ Verdadeiro" },
+                            { val: 1, label: "❌ Falso" },
+                          ].map((tf) => (
                             <button
+                              key={tf.val}
                               type="button"
-                              onClick={() => setTrueFalseAnswer(0)}
-                              className={`p-4 rounded-2xl border font-black text-sm transition cursor-pointer flex items-center justify-center gap-2 ${
-                                trueFalseAnswer === 0
-                                  ? "bg-emerald-500 text-white border-emerald-400 shadow-lg"
-                                  : styles.questionCard
+                              onClick={() => setTrueFalseAnswer(tf.val)}
+                              className={`flex-1 py-3 rounded-xl text-xs font-extrabold border transition cursor-pointer ${
+                                Number(trueFalseAnswer) === tf.val
+                                  ? "bg-emerald-600 text-white border-emerald-500 shadow"
+                                  : styles.iconBtn
                               }`}
                             >
-                              <span>✅</span> VERDADEIRO
+                              {tf.label}
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => setTrueFalseAnswer(1)}
-                              className={`p-4 rounded-2xl border font-black text-sm transition cursor-pointer flex items-center justify-center gap-2 ${
-                                trueFalseAnswer === 1
-                                  ? "bg-rose-600 text-white border-rose-500 shadow-lg"
-                                  : styles.questionCard
-                              }`}
-                            >
-                              <span>❌</span> FALSO
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* FORMATO 4: MÚLTIPLA ESCOLHA */}
-                      {questionFormat === "multiple_choice" && (
-                        <div className="space-y-3 pt-2">
-                          <label className="text-xs font-bold opacity-80 block">
-                            Alternativas (Marque o seletor da resposta correta)
-                          </label>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {options.map((opt, idx) => (
-                              <div
-                                key={idx}
-                                className={`flex items-center gap-3 p-3 rounded-xl border ${
-                                  correctOption === idx
-                                    ? "bg-emerald-500/10 border-emerald-500"
-                                    : styles.questionCard
-                                }`}
-                              >
-                                <input
-                                  type="radio"
-                                  name="correctOption"
-                                  checked={correctOption === idx}
-                                  onChange={() => setCorrectOption(idx)}
-                                  className="w-4 h-4 accent-emerald-500 cursor-pointer"
-                                />
-                                <span className="font-mono text-xs font-bold opacity-70">
-                                  {String.fromCharCode(65 + idx)}.
-                                </span>
-                                <input
-                                  type="text"
-                                  placeholder={`Opção ${String.fromCharCode(
-                                    65 + idx
-                                  )}`}
-                                  value={opt}
-                                  onChange={(e) => {
-                                    const newOpts = [...options];
-                                    newOpts[idx] = e.target.value;
-                                    setOptions(newOpts);
-                                  }}
-                                  className="w-full bg-transparent text-sm font-semibold focus:outline-none"
-                                />
-                              </div>
-                            ))}
-                          </div>
+                          ))}
                         </div>
                       )}
 
                       <button
                         type="submit"
-                        disabled={loading}
-                        className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-purple-600/20 transition cursor-pointer text-sm"
+                        disabled={savingQuestion || isQuestionQuotaReached}
+                        className="w-full py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-extrabold text-xs shadow-lg transition cursor-pointer disabled:opacity-50"
                       >
-                        {loading
-                          ? "A processar..."
+                        {savingQuestion
+                          ? "A guardar questão..."
                           : editingQuestionId
-                          ? "💾 Guardar Alterações"
-                          : "➕ Adicionar Pergunta"}
+                          ? "💾 Atualizar Questão"
+                          : "➕ Adicionar Questão ao Quiz"}
                       </button>
                     </form>
                   </div>
-                ) : (
-                  <div className="p-4 bg-purple-500/10 border border-purple-500/30 rounded-2xl text-xs text-purple-400 flex items-center justify-between">
-                    <span>
-                      💡 Este quiz pertence a outro autor. Para alterar suas
-                      perguntas, clique em <strong>Clonar para Editar</strong>.
-                    </span>
-                  </div>
-                )}
+                ) : null}
 
-                {/* Lista de Questões */}
+                {/* Lista de Questões Cadastradas */}
                 <div
                   className={`border rounded-3xl p-6 space-y-4 transition-colors duration-300 ${styles.cardPanel}`}
                 >
-                  <h3 className="text-sm font-bold border-b border-inherit pb-3">
-                    Perguntas Registradas ({questions.length})
+                  <h3 className="text-sm font-black uppercase tracking-wider opacity-75">
+                    Questões deste Questionário ({questions.length})
                   </h3>
 
                   {questions.length === 0 ? (
-                    <p className="text-xs opacity-50 py-4 text-center">
-                      Nenhuma questão cadastrada para este quiz.
+                    <p className="text-xs opacity-60 py-6 text-center">
+                      Nenhuma questão adicionada ainda.
                     </p>
                   ) : (
                     <div className="space-y-3">
-                      {questions.map((q, idx) => {
-                        const qType =
-                          q.options && !Array.isArray(q.options)
-                            ? q.options.type
-                            : "multiple_choice";
-
-                        let typeBadge = {
-                          icon: "🔘",
-                          label: "Múltipla Escolha",
-                          answerPreview:
-                            q.options?.[q.correct_option] || "N/A",
-                        };
-
-                        if (qType === "fill_blanks") {
-                          typeBadge = {
-                            icon: "🧩",
-                            label: "Completar Lacunas",
-                            answerPreview:
-                              q.options.correctSequence?.join(" → "),
-                          };
-                        } else if (qType === "sequence_order") {
-                          typeBadge = {
-                            icon: "🔀",
-                            label: "Ordenação Sequencial",
-                            answerPreview:
-                              q.options.correctOrder?.join(" → "),
-                          };
-                        } else if (qType === "true_false") {
-                          typeBadge = {
-                            icon: "⚡",
-                            label: "Verdadeiro / Falso",
-                            answerPreview:
-                              Number(q.options.correctIndex ?? q.correct_option) === 0
-                                ? "Verdadeiro"
-                                : "Falso",
-                          };
-                        }
-
-                        return (
-                          <div
-                            key={q.id || idx}
-                            className={`p-4 border rounded-2xl flex items-center justify-between gap-4 transition ${
-                              editingQuestionId === q.id
-                                ? styles.questionCardEditing
-                                : styles.questionCard
-                            }`}
-                          >
-                            <div className="flex items-start gap-3">
-                              {q.image_url ? (
-                                <img
-                                  src={q.image_url}
-                                  alt="Ilustração da Questão"
-                                  className="w-14 h-14 rounded-xl object-contain border border-slate-700 flex-shrink-0 bg-slate-900"
-                                  onError={(e) => {
-                                    e.currentTarget.style.display = "none";
-                                  }}
-                                />
-                              ) : (
-                                <div
-                                  className={`w-14 h-14 rounded-xl border flex items-center justify-center text-lg flex-shrink-0 ${styles.iconBtn}`}
-                                >
-                                  {typeBadge.icon}
-                                </div>
-                              )}
-
-                              <div className="space-y-1">
-                                <span className="text-[10px] font-bold text-purple-500 uppercase flex items-center gap-1.5 flex-wrap">
-                                  <span>
-                                    #{idx + 1} • {q.time_seconds}s
-                                  </span>
-                                  <span className="bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 px-1.5 py-0.2 rounded text-[9px]">
-                                    {typeBadge.icon} {typeBadge.label}
-                                  </span>
-                                </span>
-                                <h4 className="font-bold text-sm">
-                                  {q.question_text}
-                                </h4>
-                                <p className="text-xs text-emerald-500 font-semibold">
-                                  ✅ Gabarito: {typeBadge.answerPreview}
-                                </p>
-                              </div>
+                      {questions.map((q, idx) => (
+                        <div
+                          key={q.id}
+                          className={`p-4 rounded-2xl border flex items-start justify-between gap-4 transition ${
+                            editingQuestionId === q.id
+                              ? styles.questionCardEditing
+                              : styles.questionCard
+                          }`}
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-black text-indigo-500">
+                                #{idx + 1}
+                              </span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-500/15">
+                                {q.options?.type === "fill_blanks"
+                                  ? "Completar Lacunas"
+                                  : q.options?.type === "sequence_order"
+                                  ? "Ordenação"
+                                  : q.options?.type === "true_false"
+                                  ? "V ou F"
+                                  : "Múltipla Escolha"}
+                              </span>
+                              <span className="text-[10px] opacity-60">
+                                ⏱️ {q.time_seconds || 20}s
+                              </span>
                             </div>
-
-                            {isCreatorOfQuiz && (
-                              <div className="flex items-center gap-2 flex-shrink-0">
-                                <button
-                                  type="button"
-                                  onClick={() => handleEditQuestion(q)}
-                                  className={`p-2 border rounded-lg text-xs font-bold transition cursor-pointer ${styles.iconBtn}`}
-                                  title="Editar esta questão"
-                                >
-                                  ✏️
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteQuestion(q.id)}
-                                  className="p-2 bg-rose-500/10 hover:bg-rose-500/30 text-rose-500 rounded-lg text-xs font-bold transition cursor-pointer"
-                                  title="Eliminar pergunta"
-                                >
-                                  🗑️
-                                </button>
-                              </div>
-                            )}
+                            <p className="text-sm font-bold">{q.question_text}</p>
                           </div>
-                        );
-                      })}
+
+                          {isCreatorOfQuiz && (
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleEditQuestion(q)}
+                                className={`p-2 rounded-xl border text-xs cursor-pointer ${styles.iconBtn}`}
+                                title="Editar questão"
+                              >
+                                ✏️
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteQuestion(q.id)}
+                                className={`p-2 rounded-xl border text-xs text-rose-500 cursor-pointer ${styles.iconBtn}`}
+                                title="Excluir questão"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1474,78 +1437,133 @@ const handleQuizGeneratedByAi = async (aiData) => {
             )}
           </div>
         </div>
-      </main>
+      </div>
 
+      {/* Modal Criar Novo Quiz */}
       {showQuizModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div
-            className={`border p-6 rounded-3xl max-w-sm w-full space-y-4 relative ${styles.modalBox}`}
+            className={`max-w-md w-full border rounded-3xl p-6 space-y-5 ${styles.modalBox}`}
           >
-            <button
-              type="button"
-              onClick={() => setShowQuizModal(false)}
-              className="absolute top-4 right-4 opacity-50 hover:opacity-100 font-bold cursor-pointer"
-            >
-              ✕
-            </button>
-            <h3 className="text-lg font-bold text-center">Criar Novo Quiz</h3>
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-black">➕ Novo Questionário</h2>
+              <button
+                type="button"
+                onClick={() => setShowQuizModal(false)}
+                className="text-sm opacity-60 hover:opacity-100 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
 
             <form onSubmit={handleCreateQuiz} className="space-y-4">
               <div>
-                <label className="text-xs font-bold opacity-80 block mb-1.5">
-                  Categoria
+                <label className="block text-xs font-bold mb-1.5">
+                  Título do Questionário:
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newQuizTitle}
+                  onChange={(e) => setNewQuizTitle(e.target.value)}
+                  placeholder="Ex: Simulado de Direito Constitucional"
+                  className={`w-full px-4 py-3 rounded-xl border text-sm outline-none focus:ring-2 ${styles.inputField}`}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold mb-1.5">
+                  Categoria:
                 </label>
                 <select
                   value={newQuizCategory}
                   onChange={(e) => setNewQuizCategory(e.target.value)}
-                  className={`w-full border rounded-xl p-3 text-xs focus:outline-none focus:ring-2 font-semibold cursor-pointer ${styles.inputField}`}
+                  className={`w-full px-4 py-3 rounded-xl border text-sm outline-none focus:ring-2 ${styles.inputField}`}
                 >
-                  {QUIZ_CATEGORIES.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.icon} {cat.label}
+                  {QUIZ_CATEGORIES.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.icon} {c.label}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div>
-                <label className="text-xs font-bold opacity-80 block mb-1.5">
-                  Título do Quiz
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ex: Legislação de Trânsito"
-                  value={newQuizTitle}
-                  onChange={(e) => setNewQuizTitle(e.target.value)}
-                  className={`w-full border rounded-xl p-3 text-sm focus:outline-none focus:ring-2 font-semibold ${styles.inputField}`}
-                />
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowQuizModal(false)}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold border cursor-pointer ${styles.iconBtn}`}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold cursor-pointer"
+                >
+                  {loading ? "A criar..." : "Criar Questionário"}
+                </button>
               </div>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl transition cursor-pointer text-sm shadow-lg shadow-emerald-500/20"
-              >
-                {loading ? "A criar..." : "Criar Quiz"}
-              </button>
             </form>
           </div>
         </div>
       )}
 
-      <AiQuizGeneratorModal
-        isOpen={showAiModal}
-        onClose={() => setShowAiModal(false)}
-        onQuizGenerated={handleQuizGeneratedByAi}
-      />
+      {/* Modal de Aviso de Upgrade de Plano */}
+      {upgradeModalReason && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div
+            className={`max-w-md w-full border rounded-3xl p-7 text-center space-y-5 ${styles.modalBox}`}
+          >
+            <span className="text-4xl block">🚀</span>
+            <h3 className="text-xl font-black">Recurso Exclusivo de Plano</h3>
+            <p className="text-xs opacity-80 leading-relaxed">
+              {upgradeModalReason}
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setUpgradeModalReason("")}
+                className={`flex-1 py-3 rounded-xl text-xs font-bold border cursor-pointer ${styles.iconBtn}`}
+              >
+                Agora não
+              </button>
+              <Link
+                href="/planos"
+                className="flex-1 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-extrabold text-center shadow-lg"
+              >
+                Conhecer Planos Pro →
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
-      <ImportQuizModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        onImportComplete={handleImportComplete}
-        currentUserId={currentUserId}
-        authorName={authorName}
-      />
+      {/* Modais IA e Importação (liberados apenas conforme PLAN_LIMITS) */}
+      {showAiModal && userPlan.canUseAiGenerator && (
+        <AiQuizGeneratorModal
+          isOpen={showAiModal}
+          onClose={() => setShowAiModal(false)}
+          maxQuestions={userPlan.maxAiQuestionsPerRequest}
+          onSaveQuiz={handleSaveGeneratedQuiz}
+        />
+      )}
+
+      {showImportModal && userPlan.canImportBulk && (
+        <ImportQuizModal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          currentUserId={user?.id}
+          authorName={authorName}
+          maxQuestions={userPlan.maxQuestionsPerQuiz}
+          onImportComplete={(createdQuiz) => {
+            setMyQuizCount((prev) => prev + 1);
+            setActiveTab("my");
+            fetchQuizzes();
+            if (createdQuiz) handleSelectQuiz(createdQuiz);
+          }}
+        />
+      )}
     </div>
   );
 }

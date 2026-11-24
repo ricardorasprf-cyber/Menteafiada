@@ -96,6 +96,7 @@ export default function ImportQuizModal({
   onImportComplete,
   currentUserId,
   authorName,
+  maxQuestions = Infinity,
 }) {
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState(
@@ -499,12 +500,20 @@ export default function ImportQuizModal({
   };
 
   const handleConfirmImport = async () => {
+    if (!currentUserId?.trim()) {
+      alert("Entre na sua conta para importar um questionário.");
+      return;
+    }
     if (!title.trim()) {
       alert("Informe um título para o questionário.");
       return;
     }
     if (parsedQuestions.length === 0) {
       alert("Nenhuma questão válida identificada para importar.");
+      return;
+    }
+    if (parsedQuestions.length > maxQuestions) {
+      alert(`O arquivo contém ${parsedQuestions.length} questões válidas. Seu plano permite até ${maxQuestions} por questionário.`);
       return;
     }
 
