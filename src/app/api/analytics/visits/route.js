@@ -2,11 +2,10 @@
  * ============================================================================
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/api/analytics/visits/route.js
- * Objetivo: Endpoint responsável por:
- * - POST: Registrar cada acesso ao site (total geral + contador individual
- *   por login Clerk quando o usuário estiver autenticado);
- * - GET: Fornecer o resumo consolidado (total de acessos, acessos logados,
- *   acessos anônimos e lista de visitas por usuário) para auditoria.
+ * Objetivo: Endpoint de telemetria de visitas com proteção LGPD:
+ *   - POST: Registra cada acesso ao site (público ou autenticado);
+ *   - GET: Restrito exclusivamente aos papéis 'owner' e 'admin' (evita
+ *     exposição pública de nomes e e-mails de usuários).
  * ============================================================================
  */
 
@@ -25,7 +24,6 @@ function getSupabaseAdmin() {
   if (!supabaseUrl || !supabaseKey) {
     return null;
   }
-
   return createClient(supabaseUrl, supabaseKey);
 }
 
@@ -43,7 +41,6 @@ export async function POST(req) {
     const body = await req.json().catch(() => ({}));
     const pagePath = String(body?.pagePath || "/").slice(0, 255);
 
-    // Verifica no servidor se há sessão ativa do Clerk
     const { userId } = await auth();
     let userName = null;
     let userEmail = null;
@@ -66,7 +63,6 @@ export async function POST(req) {
       }
     }
 
-    // Executa a função atômica RPC no Supabase
     const { error: rpcError } = await supabaseAdmin.rpc("register_site_visit", {
       p_clerk_id: userId || null,
       p_user_name: userName,
@@ -89,9 +85,21 @@ export async function POST(req) {
   }
 }
 
-// GET: Consulta os totais globais e a quantidade de visitas por login
+// GET: Consulta os totais globais e a lista de visitas por usuário (RESTRITO A OWNER/ADMIN)
 export async function GET() {
   try {
+    const { userId, sessionClaims } = await auth();
+    const requesterRole =
+      sessionClaims?.metadata?.role ||
+      sessionClaims?.publicMetadata?.role;
+
+    if (!userId || (requesterRole !== "owner" && requesterRole !== "admin")) {
+      return NextResponse.json(
+        { error: "Acesso restrito à auditoria do proprietário." },
+        { status: 403 }
+      );
+    }
+
     const supabaseAdmin = getSupabaseAdmin();
     if (!supabaseAdmin) {
       return NextResponse.json(
@@ -100,14 +108,12 @@ export async function GET() {
       );
     }
 
-    // 1. Busca métricas globais
     const { data: globalMetrics } = await supabaseAdmin
       .from("site_global_metrics")
       .select("*")
       .eq("id", 1)
       .maybeSingle();
 
-    // 2. Busca visitas individuais por usuário autenticado (ordenado pelos mais ativos)
     const { data: usersVisits, error: usersErr } = await supabaseAdmin
       .from("user_visit_counts")
       .select("*")

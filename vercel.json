@@ -12,6 +12,22 @@
         {
           "key": "Content-Security-Policy",
           "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://menteafiada.vercel.app https://clerk.menteafiada.vercel.app https://accounts.menteafiada.vercel.app https://*.clerk.accounts.dev https://*.clerk.com https://*.clerk.services https://challenges.cloudflare.com https://accounts.google.com https://apis.google.com; connect-src 'self' https://menteafiada.vercel.app https://clerk.menteafiada.vercel.app https://accounts.menteafiada.vercel.app https://*.clerk.accounts.dev https://*.clerk.com https://*.clerk.services https://*.protect.clerk.com https://*.supabase.co wss://*.supabase.co https://accounts.google.com https://oauth2.googleapis.com; img-src 'self' data: blob: https://menteafiada.vercel.app https://clerk.menteafiada.vercel.app https://img.clerk.com https://*.googleusercontent.com https://*.supabase.co; frame-src 'self' https://menteafiada.vercel.app https://clerk.menteafiada.vercel.app https://accounts.menteafiada.vercel.app https://*.clerk.accounts.dev https://*.clerk.com https://*.clerk.services https://challenges.cloudflare.com https://accounts.google.com https://www.youtube.com https://player.vimeo.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self' blob:;"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
         }
       ]
     }

@@ -2,9 +2,12 @@
  * ============================================================================
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/api/cron/arena-battle/route.js
- * Objetivo: Rotina agendada (e sob demanda na janela de 5 min antes) para
- * sortear um quiz oficial e abrir a sala da Arena com 5 minutos de
- * antecedência às rodadas oficiais (14h, 16h, 18h e 20h - Brasília).
+ * Objetivo: Rotina agendada e gatilho seguro de pré-abertura da Arena:
+ *   - Exige `Authorization: Bearer ${CRON_SECRET}` para chamadas de Cron;
+ *   - Para gatilhos de pré-abertura (`?preopen=1`), valida estritamente no
+ *     servidor se o horário de Brasília está dentro da janela oficial de
+ *     5 minutos antes de 14h, 16h, 18h ou 20h, impedindo criação arbitrária
+ *     de salas fora do horário.
  * ============================================================================
  */
 
@@ -13,21 +16,50 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
+const OFFICIAL_BATTLE_HOURS = [14, 16, 18, 20];
+
 function gerarPinSala() {
   return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function isWithinPreOpenWindowBrasilia() {
+  const nowStr = new Date().toLocaleString("en-US", {
+    timeZone: "America/Sao_Paulo",
+  });
+  const brDate = new Date(nowStr);
+  const hour = brDate.getHours();
+  const minute = brDate.getMinutes();
+
+  // Permite entre XX:55 e XX:59 da hora anterior às rodadas oficiais (13:55-13:59, 15:55-15:59, etc.)
+  // ou nos primeiros 2 minutos da hora oficial (14:00-14:02, etc.)
+  const isPreWindow =
+    OFFICIAL_BATTLE_HOURS.includes((hour + 1) % 24) && minute >= 55;
+  const isStartWindow =
+    OFFICIAL_BATTLE_HOURS.includes(hour) && minute <= 2;
+
+  return isPreWindow || isStartWindow;
 }
 
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const isPreOpenTrigger = searchParams.get("preopen") === "1";
-
     const authHeader = req.headers.get("authorization");
     const cronSecret = process.env.CRON_SECRET;
 
-    // Permite chamada autenticada pelo Cron OU gatilho automático da janela de 5 min
-    if (cronSecret && !isPreOpenTrigger && authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Acesso não autorizado." }, { status: 401 });
+    const hasValidCronToken =
+      Boolean(cronSecret) && authHeader === `Bearer ${cronSecret}`;
+
+    if (!hasValidCronToken) {
+      if (!isPreOpenTrigger || !isWithinPreOpenWindowBrasilia()) {
+        return NextResponse.json(
+          {
+            error:
+              "Acesso não autorizado ou fora da janela oficial de abertura da Arena.",
+          },
+          { status: 401 }
+        );
+      }
     }
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -45,7 +77,6 @@ export async function GET(req) {
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
     // 1. Verifica se já existe uma sala da Arena aberta ('waiting' ou 'in_progress')
-    // Evita duplicidade caso o aluno abra a página durante os 5 minutos anteriores
     const { data: salasExistentes } = await supabaseAdmin
       .from("game_rooms")
       .select("id, pin, quiz_id, title, status, created_at")
