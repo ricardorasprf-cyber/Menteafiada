@@ -135,6 +135,8 @@ export default function ManageQuizzesPage() {
   const [selectedQuiz, setSelectedQuiz] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [activeTab, setActiveTab] = useState("my");
+  const [quizListRevision, setQuizListRevision] = useState(0);
+  const [loadingQuizList, setLoadingQuizList] = useState(false);
   const [loading, setLoading] = useState(false);
   const [savingQuestion, setSavingQuestion] = useState(false);
   const [togglingOfficial, setTogglingOfficial] = useState(false);
@@ -168,53 +170,59 @@ export default function ManageQuizzesPage() {
   const [trueFalseAnswer, setTrueFalseAnswer] = useState(0); // 0 = Verdadeiro, 1 = Falso
 
   const currentUserId = user?.id || "anonymous_teacher";
+  const authenticatedUserId = user?.id;
   const authorName = user?.firstName
     ? `${user.firstName} ${user.lastName || ""}`.trim()
     : "Professor";
 
   useEffect(() => {
-    if (isLoaded) {
-      fetchQuizzes();
-      fetchMyQuizzesTotal();
-    }
-  }, [user, activeTab, isLoaded]);
+    if (!isLoaded || !authenticatedUserId) return;
+    const controller = new AbortController();
 
-  // Mantém contagem precisa de quizzes pessoais para validação de cota em qualquer aba
-  const fetchMyQuizzesTotal = async () => {
-    if (!user?.id) return;
-    const { count } = await supabase
-      .from("quizzes")
-      .select("id", { count: "exact", head: true })
-      .eq("created_by", user.id);
-    if (typeof count === "number") {
-      setMyQuizCount(count);
-    }
-  };
-
-  const fetchQuizzes = async () => {
-    setLoading(true);
-    let query = supabase
-      .from("quizzes")
-      .select("*, questions(id, image_url)")
-      .order("created_at", { ascending: false });
-
-    if (activeTab === "my") {
-      query = query.eq("created_by", currentUserId);
-    } else if (activeTab === "community") {
-      query = query.eq("is_public", true).eq("is_official", false);
-    } else if (activeTab === "official") {
-      query = query.eq("is_official", true);
-    }
-
-    const { data, error } = await query;
-    if (!error && data) {
-      setQuizzes(data);
-      if (activeTab === "my") {
-        setMyQuizCount(data.length);
+    async function loadQuizCount() {
+      const { count, error } = await supabase
+        .from("quizzes")
+        .select("id", { count: "exact", head: true })
+        .eq("created_by", authenticatedUserId)
+        .abortSignal(controller.signal);
+      if (!controller.signal.aborted && !error && typeof count === "number") {
+        setMyQuizCount(count);
       }
     }
-    setLoading(false);
-  };
+
+    loadQuizCount();
+    return () => controller.abort();
+  }, [authenticatedUserId, isLoaded]);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    const controller = new AbortController();
+
+    async function loadQuizList() {
+      if (controller.signal.aborted) return;
+      setLoadingQuizList(true);
+      let query = supabase
+        .from("quizzes")
+        .select("*, questions(id, image_url)")
+        .order("created_at", { ascending: false });
+
+      if (activeTab === "my") {
+        query = query.eq("created_by", currentUserId);
+      } else if (activeTab === "community") {
+        query = query.eq("is_public", true).eq("is_official", false);
+      } else if (activeTab === "official") {
+        query = query.eq("is_official", true);
+      }
+
+      const { data, error } = await query.abortSignal(controller.signal);
+      if (controller.signal.aborted) return;
+      if (!error && data) setQuizzes(data);
+      setLoadingQuizList(false);
+    }
+
+    queueMicrotask(loadQuizList);
+    return () => controller.abort();
+  }, [activeTab, currentUserId, isLoaded, quizListRevision]);
 
   const canCreateAnotherQuiz = myQuizCount < userPlan.maxQuizzes;
 
@@ -920,7 +928,7 @@ export default function ManageQuizzesPage() {
             <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
               {quizzes.length === 0 ? (
                 <p className="text-xs opacity-50 py-10 text-center">
-                  {loading
+                  {loadingQuizList
                     ? "A carregar acervo..."
                     : "Nenhum quiz nesta categoria."}
                 </p>
@@ -1559,7 +1567,7 @@ export default function ManageQuizzesPage() {
           onImportComplete={(createdQuiz) => {
             setMyQuizCount((prev) => prev + 1);
             setActiveTab("my");
-            fetchQuizzes();
+            setQuizListRevision((previous) => previous + 1);
             if (createdQuiz) handleSelectQuiz(createdQuiz);
           }}
         />
