@@ -28,6 +28,7 @@ import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import { useTheme } from "@/app/components/ThemeProvider";
 import AdminRoomsManager from "@/app/components/AdminRoomsManager";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { VisitsAnalyticsPanel } from "@/app/components/VisitsAnalyticsPanel";
 import { excluirPerfil } from "./actions";
 
@@ -162,6 +163,8 @@ function normalizeUserRole(rawRole) {
 export default function OwnerDashboard() {
   const { user } = useUser();
   const { theme } = useTheme();
+  const { t, locale } = useLanguage();
+  const formatNumber = (value) => Number(value || 0).toLocaleString(locale);
   const currentUserId = user?.id;
   const styles = OWNER_STYLES[theme] || OWNER_STYLES["theme-classic"];
 
@@ -232,14 +235,14 @@ export default function OwnerDashboard() {
   };
 
   const formatBRL = (val) =>
-    Number(val || 0).toLocaleString("pt-BR", {
+    Number(val || 0).toLocaleString(locale, {
       style: "currency",
       currency: "BRL",
     });
 
   const formatDateTimeBR = (isoStr) => {
     if (!isoStr) return "—";
-    return new Date(isoStr).toLocaleString("pt-BR", {
+    return new Date(isoStr).toLocaleString(locale, {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
@@ -280,14 +283,11 @@ export default function OwnerDashboard() {
         }
       }
 
-      setPlansFeedback(
-        "✅ Valores salvos e sincronizados com a página /planos e o painel!"
-      );
+      setPlansFeedback("owner_pricing_saved");
       setTimeout(() => setPlansFeedback(""), 5000);
     } catch (err) {
-      setPlansFeedback(
-        `⚠️ Execute primeiro o SQL de criação da tabela subscription_plans no Supabase (${err.message}).`
-      );
+      console.error("Erro ao salvar os planos:", err);
+      setPlansFeedback("owner_pricing_error");
     } finally {
       setSavingPlans(false);
     }
@@ -311,7 +311,7 @@ export default function OwnerDashboard() {
 
     if (dbError) {
       console.error("Erro ao atualizar perfil no Supabase:", dbError);
-      alert("Erro ao atualizar o perfil no banco. Tente novamente.");
+      alert(t("owner_profile_error"));
       fetchInitialData();
       setSavingRoleId(null);
       return;
@@ -348,10 +348,8 @@ export default function OwnerDashboard() {
   };
 
   const handleDeleteUser = async (userItem) => {
-    const displayName = userItem.name || userItem.email || "este utilizador";
-    const confirmacao = window.confirm(
-      `Tem certeza de que deseja excluir permanentemente o cadastro de "${displayName}"? Esta ação apagará os dados do banco e o acesso do usuário.`
-    );
+    const displayName = userItem.name || userItem.email || t("user_name_fallback");
+    const confirmacao = window.confirm(t("owner_confirm_delete", { name: displayName }));
 
     if (!confirmacao) return;
 
@@ -362,7 +360,8 @@ export default function OwnerDashboard() {
     if (res.success) {
       setUsers((prev) => prev.filter((u) => u.id !== userItem.id));
     } else {
-      alert(res.error || "Erro ao excluir perfil.");
+      console.error("Erro ao excluir perfil:", res.error);
+      alert(t("owner_delete_error"));
     }
     setDeletingId(null);
   };
@@ -388,16 +387,16 @@ export default function OwnerDashboard() {
     });
 
   const formatAgeFromBirthdate = (dateString) => {
-    if (!dateString) return "N/D";
+    if (!dateString) return t("owner_no_value");
     const birth = new Date(dateString);
-    if (isNaN(birth.getTime())) return "N/D";
+    if (isNaN(birth.getTime())) return t("owner_no_value");
     const today = new Date();
     let age = today.getFullYear() - birth.getFullYear();
     const m = today.getMonth() - birth.getMonth();
     if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
       age--;
     }
-    return `${age} anos`;
+    return t(age === 1 ? "owner_age_one" : "owner_age_years", { count: formatNumber(age) });
   };
 
   const counts = {
@@ -462,29 +461,29 @@ export default function OwnerDashboard() {
     counts.manager + counts.creator_pro + counts.student_pro;
 
   const tabs = [
-    { id: "all", label: "Todos", count: counts.all, icon: "📋" },
-    { id: "owner", label: "Proprietários", count: counts.owner, icon: "👑" },
+    { id: "all", label: t("owner_all"), count: counts.all, icon: "📋" },
+    { id: "owner", label: t("owner_owners"), count: counts.owner, icon: "👑" },
     {
       id: "manager",
-      label: "Institucional",
+      label: t("owner_institutional"),
       count: counts.manager,
       icon: "🏫",
     },
     {
       id: "creator_pro",
-      label: "Educador Pro",
+      label: t("role_educator_pro"),
       count: counts.creator_pro,
       icon: "🚀",
     },
     {
       id: "student_pro",
-      label: "Aluno Pro",
+      label: t("role_student_pro"),
       count: counts.student_pro,
       icon: "🎓",
     },
     {
       id: "student_free",
-      label: "Explorador (Grátis)",
+      label: t("role_explorer"),
       count: counts.student_free,
       icon: "🌱",
     },
@@ -510,31 +509,33 @@ export default function OwnerDashboard() {
   const getPlanBadgeDisplay = (rawRole) => {
     const norm = normalizeUserRole(rawRole);
     const dynamicPrice = getDynamicMonthlyPrice(norm);
+    const monthly = (key) =>
+      t("owner_plan_monthly", { plan: t(key), price: formatBRL(dynamicPrice) });
 
     switch (norm) {
       case "owner":
         return {
-          text: "Acesso Master",
+          text: t("owner_master"),
           cls: "bg-amber-500/15 text-amber-500 border-amber-500/30",
         };
       case "manager":
         return {
-          text: `Institucional • ${formatBRL(dynamicPrice)}/mês`,
+          text: monthly("owner_institutional"),
           cls: "bg-cyan-500/15 text-cyan-500 border-cyan-500/30",
         };
       case "creator_pro":
         return {
-          text: `Educador Pro • ${formatBRL(dynamicPrice)}/mês`,
+          text: monthly("role_educator_pro"),
           cls: "bg-purple-500/15 text-purple-500 border-purple-500/30",
         };
       case "student_pro":
         return {
-          text: `Aluno Pro • ${formatBRL(dynamicPrice)}/mês`,
+          text: monthly("role_student_pro"),
           cls: "bg-indigo-500/15 text-indigo-500 border-indigo-500/30",
         };
       default:
         return {
-          text: `Explorador • ${formatBRL(dynamicPrice)}`,
+          text: `${t("owner_explorer")} • ${formatBRL(dynamicPrice)}`,
           cls: "bg-slate-500/15 text-slate-400 border-slate-500/30",
         };
     }
@@ -566,7 +567,7 @@ export default function OwnerDashboard() {
                 d="M10 19l-7-7m0 0l7-7m-7 7h18"
               />
             </svg>
-            Voltar para a Página Inicial
+            {t("back_home")}
           </Link>
 
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -574,11 +575,10 @@ export default function OwnerDashboard() {
               <h1
                 className={`text-3xl md:text-4xl font-extrabold mb-2 ${styles.bannerTitle}`}
               >
-                Painel de Controle do Proprietário
+                {t("owner_title")}
               </h1>
               <p className={`text-sm md:text-base ${styles.bannerSubtitle}`}>
-                Gestão centralizada de perfis, caixa real PIX, valores dos
-                planos, salas ativas e visitações.
+                {t("owner_intro")}
               </p>
             </div>
 
@@ -595,7 +595,7 @@ export default function OwnerDashboard() {
                     : styles.moduleBtnInactive
                 }`}
               >
-                👥 Perfis & Planos
+                👥 {t("owner_profiles_plans")}
               </button>
 
               <button
@@ -607,7 +607,7 @@ export default function OwnerDashboard() {
                     : styles.moduleBtnInactive
                 }`}
               >
-                💳 Planos & Receita
+                💳 {t("owner_revenue_tab")}
               </button>
 
               <button
@@ -619,7 +619,7 @@ export default function OwnerDashboard() {
                     : styles.moduleBtnInactive
                 }`}
               >
-                🎮 Salas & Legado
+                🎮 {t("owner_rooms_tab")}
               </button>
 
               <button
@@ -631,7 +631,7 @@ export default function OwnerDashboard() {
                     : styles.moduleBtnInactive
                 }`}
               >
-                📊 Visitações
+                📊 {t("owner_visits_tab")}
               </button>
             </div>
           </div>
@@ -655,14 +655,15 @@ export default function OwnerDashboard() {
                 className={`rounded-3xl p-6 border space-y-1 ${styles.tableWrapper}`}
               >
                 <span className="text-[10px] font-black uppercase tracking-wider text-emerald-500 block">
-                  💠 CAPITAL EFETIVO RECEBIDO (LÍQUIDO)
+                  💠 {t("owner_net_received")}
                 </span>
                 <p className="text-3xl font-black text-emerald-500">
                   {formatBRL(realCapitalizedNet)}
                 </p>
                 <span className="text-xs opacity-70 block">
-                  {approvedTransactions.length} pagamento(s) liquidado(s) • Bruto:{" "}
-                  {formatBRL(realCapitalizedGross)}
+                  {t("owner_settled_gross", {
+                    count: formatNumber(approvedTransactions.length), gross: formatBRL(realCapitalizedGross),
+                  })}
                 </span>
               </div>
 
@@ -670,13 +671,13 @@ export default function OwnerDashboard() {
                 className={`rounded-3xl p-6 border space-y-1 ${styles.tableWrapper}`}
               >
                 <span className="text-[10px] font-black uppercase tracking-wider text-cyan-500 block">
-                  ⚡ ENTRADAS VIA PIX INSTANTÂNEO
+                  ⚡ {t("owner_pix_received")}
                 </span>
                 <p className="text-3xl font-black text-cyan-500">
                   {formatBRL(realPixTotal)}
                 </p>
                 <span className="text-xs opacity-70 block">
-                  {pixTransactions.length} transação(ões) PIX confirmada(s)
+                  {t("owner_pix_count", { count: formatNumber(pixTransactions.length) })}
                 </span>
               </div>
 
@@ -684,13 +685,13 @@ export default function OwnerDashboard() {
                 className={`rounded-3xl p-6 border space-y-1 ${styles.tableWrapper}`}
               >
                 <span className="text-[10px] font-black uppercase tracking-wider text-indigo-500 block">
-                  📅 FATURAMENTO REAL NO MÊS ATUAL
+                  📅 {t("owner_monthly_revenue")}
                 </span>
                 <p className="text-3xl font-black text-indigo-500">
                   {formatBRL(currentMonthRevenue)}
                 </p>
                 <span className="text-xs opacity-70 block">
-                  MRR potencial dos perfis: {formatBRL(estimatedMRR)}
+                  {t("owner_estimated_revenue", { amount: formatBRL(estimatedMRR) })}
                 </span>
               </div>
 
@@ -698,17 +699,19 @@ export default function OwnerDashboard() {
                 className={`rounded-3xl p-6 border space-y-1 ${styles.tableWrapper}`}
               >
                 <span className="text-[10px] font-black uppercase tracking-wider text-amber-500 block">
-                  👥 ASSINANTES & BASE GRATUITA
+                  👥 {t("owner_subscribers")}
                 </span>
                 <p className="text-3xl font-black text-amber-500">
-                  {activePaidAccounts}{" "}
+                  {formatNumber(activePaidAccounts)}{" "}
                   <span className="text-sm font-bold opacity-70">
-                    / {users.length}
+                    / {formatNumber(users.length)}
                   </span>
                 </p>
                 <span className="text-xs opacity-70 block">
-                  {counts.student_pro} Aluno Pro • {counts.creator_pro} Educador
-                  Pro • {counts.manager} Escolas
+                  {t("owner_paid_breakdown", {
+                    students: formatNumber(counts.student_pro), teachers: formatNumber(counts.creator_pro),
+                    schools: formatNumber(counts.manager),
+                  })}
                 </span>
               </div>
             </div>
@@ -720,13 +723,10 @@ export default function OwnerDashboard() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-xl font-black">
-                    💎 Tabela de Preços Vinculada (Sincronização Global)
+                    💎 {t("owner_pricing")}
                   </h2>
                   <p className="text-xs opacity-70 mt-1">
-                    Altere os valores abaixo e clique em{" "}
-                    <strong>Salvar Tabela de Preços</strong>: a página pública{" "}
-                    <code>/planos</code>, os crachás dos usuários e o checkout
-                    PIX passam a cobrar os novos valores automaticamente.
+                    {t("owner_pricing_help")}
                   </p>
                 </div>
 
@@ -735,7 +735,7 @@ export default function OwnerDashboard() {
                     href="/planos"
                     className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold transition"
                   >
-                    Abrir Vitrine (/planos) ↗
+                    {t("owner_open_pricing")}
                   </Link>
                   <button
                     type="button"
@@ -744,15 +744,15 @@ export default function OwnerDashboard() {
                     className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold transition cursor-pointer shadow disabled:opacity-50"
                   >
                     {savingPlans
-                      ? "Salvando no Banco..."
-                      : "💾 Salvar Tabela de Preços"}
+                      ? t("saving")
+                      : `💾 ${t("owner_save_pricing")}`}
                   </button>
                 </div>
               </div>
 
               {plansFeedback && (
                 <div className="p-3.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-xs font-bold text-emerald-500">
-                  {plansFeedback}
+                  {t(plansFeedback)}
                 </div>
               )}
 
@@ -772,7 +772,7 @@ export default function OwnerDashboard() {
                     <div className="space-y-2.5 text-xs">
                       <div>
                         <label className="block text-[11px] opacity-70 font-bold mb-1">
-                          Valor Regular Ancorado (De R$):
+                          {t("owner_regular_price")}
                         </label>
                         <input
                           type="number"
@@ -793,7 +793,7 @@ export default function OwnerDashboard() {
 
                       <div>
                         <label className="block text-[11px] opacity-70 font-bold mb-1">
-                          Mensal Vigente (R$/mês):
+                          {t("owner_monthly_price")}
                         </label>
                         <input
                           type="number"
@@ -814,7 +814,7 @@ export default function OwnerDashboard() {
 
                       <div>
                         <label className="block text-[11px] opacity-70 font-bold mb-1">
-                          Plano Anual (equiv. R$/mês):
+                          {t("owner_annual_price")}
                         </label>
                         <input
                           type="number"
@@ -845,15 +845,14 @@ export default function OwnerDashboard() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <h2 className="text-xl font-black">
-                    🧾 Extrato de Pagamentos Efetivos (PIX & Cartão)
+                    🧾 {t("owner_payment_statement")}
                   </h2>
                   <p className="text-xs opacity-70 mt-0.5">
-                    Cada liquidação confirmada pelo Webhook do gateway aparece
-                    automaticamente aqui e promove o perfil do comprador.
+                    {t("owner_payment_statement_help")}
                   </p>
                 </div>
                 <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
-                  {approvedTransactions.length} liquidação(ões) confirmada(s)
+                  {t("owner_settled_count", { count: formatNumber(approvedTransactions.length) })}
                 </span>
               </div>
 
@@ -863,13 +862,10 @@ export default function OwnerDashboard() {
                 >
                   <span className="text-3xl block">💠</span>
                   <p className="text-sm font-extrabold">
-                    Nenhuma transação PIX/Cartão liquidada ainda
+                    {t("owner_no_payments")}
                   </p>
                   <p className="text-xs opacity-70 max-w-lg mx-auto">
-                    Assim que o gateway de pagamento (Mercado Pago, Asaas ou
-                    Stripe) for conectado e o primeiro cliente concluir um PIX,
-                    o valor bruto, a taxa descontada e o valor líquido
-                    aparecerão automaticamente neste livro-razão.
+                    {t("owner_no_payments_help")}
                   </p>
                 </div>
               ) : (
@@ -879,13 +875,13 @@ export default function OwnerDashboard() {
                       <tr
                         className={`border-b text-[11px] font-bold uppercase tracking-wider ${styles.tableHeader}`}
                       >
-                        <th className="py-3.5 px-4">Data / Hora</th>
-                        <th className="py-3.5 px-4">Pagador</th>
-                        <th className="py-3.5 px-4">Plano / Produto</th>
-                        <th className="py-3.5 px-4 text-center">Método</th>
-                        <th className="py-3.5 px-4 text-right">Bruto</th>
-                        <th className="py-3.5 px-4 text-right">Taxa</th>
-                        <th className="py-3.5 px-4 text-right">Líquido</th>
+                        <th className="py-3.5 px-4">{t("arena_datetime")}</th>
+                        <th className="py-3.5 px-4">{t("owner_payer")}</th>
+                        <th className="py-3.5 px-4">{t("owner_product")}</th>
+                        <th className="py-3.5 px-4 text-center">{t("owner_method")}</th>
+                        <th className="py-3.5 px-4 text-right">{t("owner_gross")}</th>
+                        <th className="py-3.5 px-4 text-right">{t("owner_fee")}</th>
+                        <th className="py-3.5 px-4 text-right">{t("owner_net")}</th>
                       </tr>
                     </thead>
                     <tbody className={`divide-y ${styles.tableDivider}`}>
@@ -905,7 +901,7 @@ export default function OwnerDashboard() {
                           </td>
                           <td className="py-3.5 px-4 text-center">
                             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-cyan-500/15 text-cyan-500 border border-cyan-500/30">
-                              {tx.payment_method}
+                              {tx.payment_method?.toLowerCase() === "card" ? t("owner_card") : tx.payment_method}
                             </span>
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono opacity-80">
@@ -953,7 +949,7 @@ export default function OwnerDashboard() {
                           : styles.tabInactiveBadge
                       }`}
                     >
-                      {tab.count}
+                      {formatNumber(tab.count)}
                     </span>
                   </button>
                 );
@@ -965,11 +961,11 @@ export default function OwnerDashboard() {
             >
               {loading ? (
                 <div className="p-12 text-center opacity-60 font-medium">
-                  Carregando contas e perfis...
+                  {t("owner_profiles_loading")}
                 </div>
               ) : filteredUsers.length === 0 ? (
                 <div className="p-12 text-center opacity-60 font-medium">
-                  Nenhum usuário encontrado nesta categoria.
+                  {t("owner_profiles_empty")}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -978,12 +974,12 @@ export default function OwnerDashboard() {
                       <tr
                         className={`border-b text-[11px] font-bold uppercase tracking-wider ${styles.tableHeader}`}
                       >
-                        <th className="py-4 px-5">Utilizador</th>
-                        <th className="py-4 px-5">E-mail</th>
-                        <th className="py-4 px-5">Idade</th>
-                        <th className="py-4 px-5">Plano Vigente</th>
-                        <th className="py-4 px-5">Perfil / Atribuição</th>
-                        <th className="py-4 px-5 text-right">Ações</th>
+                        <th className="py-4 px-5">{t("owner_user")}</th>
+                        <th className="py-4 px-5">{t("owner_email")}</th>
+                        <th className="py-4 px-5">{t("owner_age")}</th>
+                        <th className="py-4 px-5">{t("owner_current_plan")}</th>
+                        <th className="py-4 px-5">{t("owner_role")}</th>
+                        <th className="py-4 px-5 text-right">{t("owner_actions")}</th>
                       </tr>
                     </thead>
                     <tbody className={`divide-y ${styles.tableDivider}`}>
@@ -1005,10 +1001,10 @@ export default function OwnerDashboard() {
                             )}`}
                           >
                             <td className="py-4 px-5 font-semibold whitespace-nowrap">
-                              {u.name || "Sem Nome"}
+                              {u.name || t("owner_no_name")}
                               {isSelf && (
                                 <span className="ml-2 text-[10px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full font-bold">
-                                  Você
+                                  {t("owner_you")}
                                 </span>
                               )}
                             </td>
@@ -1037,6 +1033,7 @@ export default function OwnerDashboard() {
                               <div className="flex items-center gap-2">
                                 <select
                                   value={normalizedRole}
+                                  aria-label={t("owner_role")}
                                   disabled={isSavingRole}
                                   onChange={(e) =>
                                     handleRoleChange(u.id, e.target.value)
@@ -1044,40 +1041,40 @@ export default function OwnerDashboard() {
                                   className={`border rounded-xl px-3 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 transition cursor-pointer disabled:opacity-50 ${styles.roleSelect}`}
                                 >
                                   <option value="student_free">
-                                    🌱 Explorador (
+                                    🌱 {t("owner_explorer")} (
                                     {formatBRL(
                                       getDynamicMonthlyPrice("student_free")
                                     )}
                                     )
                                   </option>
                                   <option value="student_pro">
-                                    🎓 Aluno Pro (
+                                    🎓 {t("role_student_pro")} (
                                     {formatBRL(
                                       getDynamicMonthlyPrice("student_pro")
                                     )}
                                     )
                                   </option>
                                   <option value="creator_pro">
-                                    🚀 Educador Pro (
+                                    🚀 {t("role_educator_pro")} (
                                     {formatBRL(
                                       getDynamicMonthlyPrice("creator_pro")
                                     )}
                                     )
                                   </option>
                                   <option value="manager">
-                                    🏫 Institucional (
+                                    🏫 {t("owner_institutional")} (
                                     {formatBRL(
                                       getDynamicMonthlyPrice("manager")
                                     )}
                                     )
                                   </option>
                                   <option value="owner">
-                                    👑 Proprietário
+                                    👑 {t("role_owner")}
                                   </option>
                                 </select>
                                 {isSavingRole && (
                                   <span className="text-[11px] text-indigo-500 font-bold animate-pulse">
-                                    Salvando...
+                                    {t("saving")}
                                   </span>
                                 )}
                               </div>
@@ -1090,16 +1087,16 @@ export default function OwnerDashboard() {
                                   disabled={isDeleting}
                                   onClick={() => handleDeleteUser(u)}
                                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 transition disabled:opacity-50 cursor-pointer"
-                                  title="Excluir conta permanentemente"
+                                  title={t("owner_delete_title")}
                                 >
                                   <span>🗑️</span>
                                   <span>
-                                    {isDeleting ? "Excluindo..." : "Excluir"}
+                                    {t(isDeleting ? "owner_deleting" : "owner_delete")}
                                   </span>
                                 </button>
                               ) : (
                                 <span className="text-[11px] opacity-50 italic">
-                                  Protegido
+                                  {t("owner_protected")}
                                 </span>
                               )}
                             </td>

@@ -1,4 +1,7 @@
+import { fr } from "./fr.js";
+
 export const dictionaries = {
+  fr,
   pt: {
     hello: "Olá",
     account_title: "Conta MenteAfiada",

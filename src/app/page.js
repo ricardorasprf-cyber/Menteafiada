@@ -16,8 +16,9 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useAuth, useUser } from "@clerk/nextjs";
+import { useAuth } from "@clerk/nextjs";
 import { useTheme } from "@/app/components/ThemeProvider";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const HOME_THEMES = {
   "theme-classic": {
@@ -90,8 +91,8 @@ const HOME_THEMES = {
 export default function HomePage() {
   const router = useRouter();
   const { isSignedIn } = useAuth();
-  const { user } = useUser();
   const { theme } = useTheme();
+  const { t } = useLanguage();
   const styles = HOME_THEMES[theme] || HOME_THEMES["theme-classic"];
 
   const [pinCode, setPinCode] = useState("");
@@ -121,20 +122,18 @@ export default function HomePage() {
             <span
               className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full border text-xs font-black uppercase tracking-widest ${styles.badge}`}
             >
-              <span>🧠</span> PLATAFORMA EDUCACIONAL GAMIFICADA
+              <span>🧠</span> {t("home_badge")}
             </span>
 
             <h1 className="text-4xl md:text-6xl font-black tracking-tight leading-[1.08]">
-              Aprenda jogando, ensine com{" "}
+              {t("home_headline")}{" "}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-500 via-purple-500 to-amber-500">
-                inteligência
+                {t("home_highlight")}
               </span>
             </h1>
 
             <p className="text-sm md:text-lg opacity-80 max-w-2xl leading-relaxed">
-              Quizzes interativos em tempo real, Batalhas Oficiais na Arena,
-              trilhas com videoaulas, e-books em PDF e certificados digitais
-              verificáveis em um só lugar.
+              {t("home_description")}
             </p>
 
             <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -143,15 +142,15 @@ export default function HomePage() {
                 className={`px-7 py-4 rounded-2xl text-xs md:text-sm font-extrabold transition ${styles.btnPrimary}`}
               >
                 {isSignedIn
-                  ? "🎓 Acessar Meus Cursos & Materiais"
-                  : "🚀 Criar Conta Gratuita"}
+                  ? `🎓 ${t("home_open_courses")}`
+                  : `🚀 ${t("sign_up_nav")}`}
               </Link>
 
               <Link
                 href="/planos"
                 className={`px-6 py-4 rounded-2xl text-xs md:text-sm font-extrabold transition ${styles.btnSecondary}`}
               >
-                💎 Conhecer Planos
+                💎 {t("home_explore_plans")}
               </Link>
             </div>
           </div>
@@ -164,18 +163,17 @@ export default function HomePage() {
             >
               <div className="flex items-center justify-between">
                 <span className="text-xs font-black uppercase tracking-widest opacity-65">
-                  SALA AO VIVO
+                  {t("home_live_room")}
                 </span>
                 <span className="px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
-                  ● ONLINE
+                  ● {t("home_online")}
                 </span>
               </div>
 
               <div>
-                <h2 className="text-2xl font-black">Entrar com Código PIN</h2>
+                <h2 className="text-2xl font-black">{t("home_pin_title")}</h2>
                 <p className="text-xs opacity-70 mt-1">
-                  Digite o PIN de 6 dígitos fornecido pelo seu professor ou
-                  anfitrião da sala.
+                  {t("home_pin_help")}
                 </p>
               </div>
 
@@ -184,6 +182,7 @@ export default function HomePage() {
                 inputMode="numeric"
                 maxLength={6}
                 placeholder="000000"
+                aria-label={t("room_pin_code")}
                 value={pinCode}
                 onChange={(e) =>
                   setPinCode(e.target.value.replace(/\D/g, "").slice(0, 6))
@@ -195,7 +194,7 @@ export default function HomePage() {
                 type="submit"
                 className={`w-full py-4 rounded-2xl text-sm font-extrabold transition cursor-pointer ${styles.btnPrimary}`}
               >
-                🎮 Entrar na Partida Agora
+                🎮 {t("home_join_now")}
               </button>
             </form>
           </div>
@@ -208,15 +207,13 @@ export default function HomePage() {
         >
           <div className="space-y-2 max-w-2xl">
             <span className="text-xs font-black uppercase tracking-widest text-amber-300">
-              ⚔️ LIGA EDUCACIONAL MENSAL • RODADAS DIÁRIAS
+              ⚔️ {t("home_arena_badge")}
             </span>
             <h2 className="text-2xl md:text-3xl font-black">
-              Arena de Batalhas Oficiais (14h, 16h, 18h e 20h)
+              {t("home_arena_title")}
             </h2>
             <p className="text-xs md:text-sm opacity-85 leading-relaxed">
-              Os portões abrem exatamente 5 minutos antes de cada horário
-              oficial. Dispute o ranking mensal, conquiste pódios e ganhe
-              certificados VIP!
+              {t("home_arena_help")}
             </p>
           </div>
 
@@ -224,7 +221,7 @@ export default function HomePage() {
             href="/arena"
             className="px-7 py-4 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs md:text-sm whitespace-nowrap transition shadow-lg"
           >
-            Acessar Arena Mensal →
+            {t("home_arena_action")} →
           </Link>
         </section>
 
@@ -232,41 +229,37 @@ export default function HomePage() {
         <section id="como-jogar" className="space-y-6">
           <div className="text-center max-w-2xl mx-auto space-y-2">
             <h2 className="text-2xl md:text-3xl font-black">
-              Como Funciona o MenteAfiada?
+              {t("home_steps_title")}
             </h2>
             <p className="text-xs md:text-sm opacity-75">
-              Três passos simples para engajar turmas inteiras ou turbinar seus
-              estudos individuais.
+              {t("home_steps_intro")}
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className={`border rounded-3xl p-6 space-y-3 ${styles.card}`}>
               <span className="text-3xl block">1️⃣</span>
-              <h3 className="text-lg font-black">Crie ou Escolha um Quiz</h3>
+              <h3 className="text-lg font-black">{t("home_choose_quiz")}</h3>
               <p className="text-xs opacity-75 leading-relaxed">
-                Professores criam avaliações manualmente ou geram questões em
-                segundos usando a IA integrada (Gemini).
+                {t("home_choose_quiz_desc")}
               </p>
             </div>
 
             <div className={`border rounded-3xl p-6 space-y-3 ${styles.card}`}>
               <span className="text-3xl block">2️⃣</span>
-              <h3 className="text-lg font-black">Compartilhe o PIN Ao Vivo</h3>
+              <h3 className="text-lg font-black">{t("home_share_pin")}</h3>
               <p className="text-xs opacity-75 leading-relaxed">
-                Alunos entram pelo celular ou computador sem precisar instalar
-                nada, competindo com pontuação por velocidade e precisão.
+                {t("home_share_pin_desc")}
               </p>
             </div>
 
             <div className={`border rounded-3xl p-6 space-y-3 ${styles.card}`}>
               <span className="text-3xl block">3️⃣</span>
               <h3 className="text-lg font-black">
-                Estude Cursos & Emita Certificados
+                {t("home_earn_certificates")}
               </h3>
               <p className="text-xs opacity-75 leading-relaxed">
-                Acesse videoaulas, baixe apostilas e e-books em PDF e emita
-                certificados digitais verificáveis ao concluir cada trilha.
+                {t("home_earn_certificates_desc")}
               </p>
             </div>
           </div>
@@ -277,35 +270,33 @@ export default function HomePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
             <div className={`border rounded-3xl p-5 space-y-2 ${styles.card}`}>
               <span className="text-2xl">🤖</span>
-              <h4 className="font-black text-sm">Gerador de Questões IA</h4>
+              <h4 className="font-black text-sm">{t("home_ai")}</h4>
               <p className="text-xs opacity-70">
-                Crie simulados completos a partir de qualquer tema ou texto em
-                segundos.
+                {t("home_ai_desc")}
               </p>
             </div>
 
             <div className={`border rounded-3xl p-5 space-y-2 ${styles.card}`}>
               <span className="text-2xl">📜</span>
-              <h4 className="font-black text-sm">Modo Leitura (Sépia)</h4>
+              <h4 className="font-black text-sm">{t("home_reading")}</h4>
               <p className="text-xs opacity-70">
-                4 temas visuais (Claro, Escuro, NEON e Papel) para conforto
-                visual total.
+                {t("home_reading_desc")}
               </p>
             </div>
 
             <div className={`border rounded-3xl p-5 space-y-2 ${styles.card}`}>
               <span className="text-2xl">📊</span>
-              <h4 className="font-black text-sm">Relatórios em CSV / PDF</h4>
+              <h4 className="font-black text-sm">{t("home_reports")}</h4>
               <p className="text-xs opacity-70">
-                Acompanhe o desempenho detalhado de cada aluno e turma.
+                {t("home_reports_desc")}
               </p>
             </div>
 
             <div className={`border rounded-3xl p-5 space-y-2 ${styles.card}`}>
               <span className="text-2xl">🏅</span>
-              <h4 className="font-black text-sm">Conquistas & Certificados</h4>
+              <h4 className="font-black text-sm">{t("home_achievements")}</h4>
               <p className="text-xs opacity-70">
-                Sistema de medalhas, ranking mensal e certificação digital.
+                {t("home_achievements_desc")}
               </p>
             </div>
           </div>

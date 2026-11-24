@@ -31,7 +31,19 @@ import LiveWordCloud from "@/app/components/LiveWordCloud";
 import QuickPulseOverlay from "@/app/components/QuickPulseOverlay";
 import { QUIZ_CATEGORIES } from "@/constants/categories";
 import { sounds } from "@/lib/soundEffects";
-import { resolveUserPlan, formatLimitValue } from "@/lib/planLimits";
+import { resolveUserPlan } from "@/lib/planLimits";
+
+const HOST_PLAN_KEYS = {
+  free: "role_explorer", student_pro: "role_student_pro", creator_pro: "role_educator_pro",
+  institutional: "owner_institutional", owner: "owner_master",
+};
+
+const HOST_CATEGORY_KEYS = {
+  "Concurso Público": "host_category_exam", "Conhecimentos Gerais": "host_category_general",
+  História: "host_category_history", Português: "host_category_portuguese",
+  "Matemática & Raciocínio": "host_category_math", Tecnologia: "host_category_technology",
+  Direito: "host_category_law", Atualidades: "host_category_news",
+};
 
 // Normalizador defensivo: converte string JSONB ou objeto/array em formato estruturado
 function parseQuestionOptions(rawOptions) {
@@ -147,7 +159,8 @@ const HOST_STYLES = {
 
 function HostGameContent() {
   const { user } = useUser();
-  const { t } = useLanguage();
+  const { t, locale } = useLanguage();
+  const number = (value) => Number(value || 0).toLocaleString(locale);
   const { theme } = useTheme();
   const searchParams = useSearchParams();
   const preselectedQuizId = searchParams?.get("quizId") || "";
@@ -165,6 +178,10 @@ function HostGameContent() {
     "free";
   const userPlan = resolveUserPlan(userRole, planTier);
   const maxRoomPlayers = userPlan.maxPlayersPerRoom;
+  const planName = t(HOST_PLAN_KEYS[userPlan.key]);
+  const roomLimit = maxRoomPlayers === Infinity ? t("shared_unlimited") : number(maxRoomPlayers);
+  const categoryLabel = (category, fallback) =>
+    Object.hasOwn(HOST_CATEGORY_KEYS, category) ? t(HOST_CATEGORY_KEYS[category]) : fallback;
 
   // Estados principais da sessão
   const [quizzes, setQuizzes] = useState([]);
@@ -440,7 +457,7 @@ function HostGameContent() {
   };
 
   const handleKickPlayer = async (playerId, playerName) => {
-    if (!confirm(`Tem certeza que deseja remover "${playerName}" da sala?`))
+    if (!confirm(t("host_remove_confirm", { name: playerName })))
       return;
 
     const { error } = await supabase
@@ -449,7 +466,7 @@ function HostGameContent() {
       .eq("id", playerId);
 
     if (error) {
-      alert("Erro ao remover participante: " + error.message);
+      alert(t("host_remove_error") + error.message);
     } else {
       setPlayers((prev) => prev.filter((p) => p.id !== playerId));
     }
@@ -656,7 +673,7 @@ function HostGameContent() {
   ]);
 
   const handleStartNextQuiz = async () => {
-    if (!nextQuizId) return alert("Selecione um quiz para continuar.");
+    if (!nextQuizId) return alert(t("host_choose_quiz_first"));
 
     setLoading(true);
 
@@ -811,12 +828,12 @@ function HostGameContent() {
   // Exportação CSV incluindo também Nuvem de Palavras e Termômetro
   const handleExportCSV = () => {
     if (players.length === 0 && !wordCloudReport && !quickPulseReport) {
-      return alert("Não há dados para exportar.");
+      return alert(t("host_export_empty"));
     }
 
     let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent +=
-      "Posicao;Nome do Aluno;Pontuacao;Acertos;Total Respondido;Taxa de Acerto\n";
+    csvContent += ["arena_rank", "host_student", "arena_score", "correct_hits", "host_answered_total", "host_accuracy"]
+      .map((key) => t(key)).join(";") + "\n";
 
     rankedPlayers.forEach((p, idx) => {
       const pAnswers = answers.filter((a) => a.player_id === p.id);
@@ -831,18 +848,18 @@ function HostGameContent() {
     });
 
     if (wordCloudReport?.words?.length > 0) {
-      csvContent += `\nNUVEM DE PALAVRAS;Tema: ${wordCloudReport.prompt}\n`;
-      csvContent += "Palavra;Ocorrencias\n";
+      csvContent += `\n${t("host_cloud")};${t("host_topic")} ${wordCloudReport.prompt}\n`;
+      csvContent += `${t("host_word")};${t("host_occurrences")}\n`;
       wordCloudReport.words.forEach((w) => {
         csvContent += `${w.word};${w.count}\n`;
       });
     }
 
     if (quickPulseReport?.stats?.length > 0) {
-      csvContent += `\nTERMOMETRO DA TURMA;Pergunta: ${quickPulseReport.question}\n`;
-      csvContent += "Opcao;Votos;Percentual\n";
+      csvContent += `\n${t("host_pulse")};${t("host_prompt")} ${quickPulseReport.question}\n`;
+      csvContent += `${t("option_prefix")};${t("host_votes")};${t("host_percentage")}\n`;
       quickPulseReport.stats.forEach((s) => {
-        csvContent += `${s.label};${s.count};${s.percent}%\n`;
+        csvContent += `${t(s.label)};${s.count};${s.percent}%\n`;
       });
     }
 
@@ -881,7 +898,7 @@ function HostGameContent() {
     if (timeState === "RODANDO") {
       return {
         label: t("pause_answers") || "Pausar Respostas",
-        shortLabel: "Pause",
+        shortLabel: t("host_pause"),
         icon: "⏸",
         style: "bg-amber-500 hover:bg-amber-400 text-slate-950",
       };
@@ -889,9 +906,9 @@ function HostGameContent() {
 
     return {
       label: revealCorrectAnswer
-        ? "Ocultar Resposta Certa"
-        : "Mostrar Resposta Certa",
-      shortLabel: revealCorrectAnswer ? "Ocultar" : "Gabarito",
+        ? t("host_hide_correct")
+        : t("host_show_correct"),
+      shortLabel: revealCorrectAnswer ? t("host_hide") : t("host_answer_key"),
       icon: "👁️",
       style: revealCorrectAnswer
         ? "bg-slate-700 hover:bg-slate-600 text-white"
@@ -913,7 +930,7 @@ function HostGameContent() {
       >
         <span className="flex items-center gap-1.5 text-cyan-500 truncate">
           <span>✨</span>
-          <span>Interações Fluidas (Nuvem & Termômetro)</span>
+          <span>{t("host_interactions")}</span>
         </span>
         <span className="text-[10px] opacity-70 flex items-center gap-1 flex-shrink-0">
           <span>{showFluidInteractions ? "▲" : "▼"}</span>
@@ -923,7 +940,7 @@ function HostGameContent() {
       {showFluidInteractions && (
         <div className="px-3.5 pb-3.5 pt-2.5 border-t border-inherit space-y-2.5 animate-in fade-in duration-150">
           <p className="text-[11px] opacity-75">
-            Dispare na tela dos alunos conectados:
+            {t("host_interactions_help")}
           </p>
 
           <div className="grid grid-cols-1 gap-2">
@@ -936,7 +953,7 @@ function HostGameContent() {
               className="w-full px-3.5 py-2.5 rounded-xl text-xs font-extrabold bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white shadow-md shadow-cyan-600/20 transition cursor-pointer flex items-center justify-center gap-2"
             >
               <span>☁️</span>
-              <span>Nuvem de Palavras</span>
+              <span>{t("host_cloud")}</span>
             </button>
 
             <button
@@ -948,7 +965,7 @@ function HostGameContent() {
               className="w-full px-3.5 py-2.5 rounded-xl text-xs font-extrabold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/20 transition cursor-pointer flex items-center justify-center gap-2"
             >
               <span>🌡️</span>
-              <span>Termômetro da Turma</span>
+              <span>{t("host_pulse")}</span>
             </button>
           </div>
         </div>
@@ -986,11 +1003,11 @@ function HostGameContent() {
                   <span className="text-lg">🎛️</span>
                   <div>
                     <h2 className="text-sm font-black uppercase tracking-wider">
-                      Controles da Sala
+                      {t("host_room_controls")}
                     </h2>
                     <span className="text-[11px] font-mono opacity-70">
                       PIN: <strong className="text-amber-500">{session.pin}</strong> •{" "}
-                      {players.length}/{formatLimitValue(maxRoomPlayers)} alunos
+                      {t("host_students_online", { count: number(players.length), limit: roomLimit })}
                     </span>
                   </div>
                 </div>
@@ -999,9 +1016,9 @@ function HostGameContent() {
                   type="button"
                   onClick={() => setIsDrawerOpen(false)}
                   className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold cursor-pointer ${styles.neutralBtn}`}
-                  title="Retrair painel para a esquerda (Atalho: G)"
+                  title={t("host_close_drawer")}
                 >
-                  ◀ Retrair
+                  ◀ {t("host_collapse")}
                 </button>
               </div>
 
@@ -1023,14 +1040,14 @@ function HostGameContent() {
                     onClick={handlePrevQuestion}
                     className={`py-2.5 border font-bold text-xs rounded-xl transition cursor-pointer ${styles.neutralBtn}`}
                   >
-                    ← Anterior
+                    {t("prev_question")}
                   </button>
                   <button
                     type="button"
                     onClick={handleNextQuestion}
                     className="py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition cursor-pointer"
                   >
-                    Próxima →
+                    {t("next_question_arrow")}
                   </button>
                 </div>
               )}
@@ -1043,7 +1060,7 @@ function HostGameContent() {
                 <div
                   className={`border rounded-xl p-3 flex items-center justify-between text-xs ${styles.subBox}`}
                 >
-                  <span className="font-bold opacity-80">Tempo:</span>
+                  <span className="font-bold opacity-80">{t("host_seconds")}</span>
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
@@ -1081,7 +1098,7 @@ function HostGameContent() {
                 >
                   <span>📱</span>
                   <span>
-                    QR Code ({players.length}/{formatLimitValue(maxRoomPlayers)})
+                    {t("host_qr_short")} ({number(players.length)}/{roomLimit})
                   </span>
                 </button>
 
@@ -1091,7 +1108,7 @@ function HostGameContent() {
                   className={`py-2.5 px-3 border font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${styles.neutralBtn}`}
                 >
                   <span>{soundEnabled ? "🔊" : "🔇"}</span>
-                  <span>{soundEnabled ? "Som Ativo" : "Mudo"}</span>
+                  <span>{soundEnabled ? t("host_sound_on") : t("host_sound_off")}</span>
                 </button>
               </div>
 
@@ -1107,15 +1124,15 @@ function HostGameContent() {
                   </div>
                   <div className="text-xs space-y-1">
                     <span className="font-bold block opacity-80">
-                      Rendimento da Questão:
+                      {t("question_performance")}
                     </span>
                     <div className="flex items-center gap-2 font-bold text-emerald-500">
                       <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                      Acertos: {correctPercent}% ({correctCount})
+                      {t("host_correct_label")} {correctPercent}% ({correctCount})
                     </div>
                     <div className="flex items-center gap-2 font-bold text-rose-500">
                       <span className="w-2 h-2 rounded-full bg-rose-500" />
-                      Erros: {wrongPercent}% ({wrongCount})
+                      {t("host_wrong_label")} {wrongPercent}% ({wrongCount})
                     </div>
                   </div>
                 </div>
@@ -1125,21 +1142,21 @@ function HostGameContent() {
               <div className="pt-2 border-t border-inherit space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="text-[11px] font-bold text-amber-500 uppercase tracking-wider">
-                    🏆 Ranking Parcial
+                    🏆 {t("partial_ranking")}
                   </span>
                   <button
                     type="button"
                     onClick={() => setHideNames(!hideNames)}
                     className={`text-[10px] border px-2 py-0.5 rounded font-bold cursor-pointer ${styles.neutralBtn}`}
                   >
-                    👁 {hideNames ? "Exibir" : "Ocultar"}
+                    👁 {hideNames ? t("host_show") : t("host_hide")}
                   </button>
                 </div>
 
                 <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
                   {players.length === 0 ? (
                     <p className="text-xs opacity-50 italic">
-                      Nenhum participante ainda...
+                      {t("host_no_players")}
                     </p>
                   ) : (
                     players.slice(0, 6).map((p, idx) => (
@@ -1149,10 +1166,10 @@ function HostGameContent() {
                       >
                         <span className="font-bold truncate pr-2">
                           #{idx + 1}{" "}
-                          {hideNames ? `Aluno #${idx + 1}` : p.player_name}
+                          {hideNames ? `${t("host_student")} #${number(idx + 1)}` : p.player_name}
                         </span>
                         <span className="font-mono text-emerald-500 font-bold flex-shrink-0">
-                          {p.score || 0} pts
+                          {t("arena_score_points", { score: number(p.score) })}
                         </span>
                       </div>
                     ))
@@ -1165,17 +1182,17 @@ function HostGameContent() {
                 className={`border rounded-xl p-3 text-[10px] opacity-75 space-y-1 ${styles.subBox}`}
               >
                 <span className="font-extrabold uppercase block text-indigo-400">
-                  ⌨️ Atalhos de Apresentação:
+                  ⌨️ {t("host_shortcuts")}
                 </span>
                 <p>
-                  <strong>Espaço / Enter:</strong> Play → Pause → Gabarito
+                  <strong>{t("host_space_shortcut")}</strong> {t("host_action_shortcut")}
                 </p>
                 <p>
-                  <strong>Setas ← / →:</strong> Questão Anterior / Próxima
+                  <strong>{t("host_arrow_shortcut")}</strong> {t("host_question_nav")}
                 </p>
                 <p>
-                  <strong>Tecla Q:</strong> QR Code • <strong>Tecla G:</strong>{" "}
-                  Gaveta
+                  <strong>{t("host_key_q")}</strong> {t("host_qr_short")} • <strong>{t("host_key_g")}</strong>{" "}
+                  {t("host_drawer")}
                 </p>
               </div>
 
@@ -1186,7 +1203,7 @@ function HostGameContent() {
                   onClick={() => setShowRoulette(true)}
                   className="py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl transition cursor-pointer shadow"
                 >
-                  🎰 Sortear
+                  🎰 {t("host_draw")}
                 </button>
 
                 <button
@@ -1194,7 +1211,7 @@ function HostGameContent() {
                   onClick={handleEndGame}
                   className="py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl transition cursor-pointer shadow"
                 >
-                  🏆 Finalizar
+                  🏆 {t("host_finish")}
                 </button>
               </div>
             </div>
@@ -1205,8 +1222,8 @@ function HostGameContent() {
               onClick={() => setIsDrawerOpen((prev) => !prev)}
               title={
                 isDrawerOpen
-                  ? "Recolher Painel do Professor (Atalho: G)"
-                  : "Abrir Painel do Professor (Atalho: G)"
+                  ? t("host_close_drawer")
+                  : t("host_open_drawer")
               }
               className={`mt-6 w-11 py-4 rounded-r-2xl border-y border-r flex flex-col items-center justify-center gap-2 transition-all cursor-pointer ${styles.drawerTab}`}
             >
@@ -1252,8 +1269,7 @@ function HostGameContent() {
 
             <div className="flex items-center gap-2 flex-wrap">
               <span className="px-3 py-1 rounded-full text-[11px] font-black bg-indigo-500/15 text-indigo-500 border border-indigo-500/25">
-                Plano: {userPlan.label} (Capacidade:{" "}
-                {formatLimitValue(maxRoomPlayers)} alunos)
+                {t("host_plan_capacity", { plan: planName, limit: roomLimit })}
               </span>
 
               {session && session.status !== "FINALIZADO" && (
@@ -1263,7 +1279,7 @@ function HostGameContent() {
                   className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold border transition cursor-pointer flex items-center gap-1.5 ${styles.soundBtn}`}
                 >
                   <span>{isDrawerOpen ? "◀" : "▶"}</span>
-                  <span>🎛️ Controles</span>
+                  <span>🎛️ {t("host_controls")}</span>
                 </button>
               )}
 
@@ -1271,11 +1287,11 @@ function HostGameContent() {
                 type="button"
                 onClick={toggleSound}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-1.5 ${styles.soundBtn}`}
-                title="Ativar/Desativar Som"
+                title={t("host_toggle_sound")}
               >
                 <span>{soundEnabled ? "🔊" : "🔇"}</span>
                 <span className="hidden sm:inline">
-                  {soundEnabled ? "Som Ativado" : "Som Mudo"}
+                  {soundEnabled ? t("host_sound_on") : t("host_sound_off")}
                 </span>
               </button>
             </div>
@@ -1294,7 +1310,7 @@ function HostGameContent() {
                 {!session
                   ? t("host_panel_desc_waiting") ||
                     "Crie uma sala para começar."
-                  : "Atalhos: Espaço (Play/Pause/Gabarito) • Setas ←/→ (Navegar) • Q (QR Code) • G (Gaveta)"}
+                  : t("host_shortcuts_summary")}
               </p>
             </div>
 
@@ -1313,15 +1329,13 @@ function HostGameContent() {
           {roomCapacityWarning && (
             <div className="mt-4 p-3 rounded-2xl bg-amber-500/15 border border-amber-500/35 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
               <span className="font-bold text-amber-600 dark:text-amber-300">
-                ⚠️ Capacidade máxima de {maxRoomPlayers} alunos do plano{" "}
-                {userPlan.label} atingida. Novas conexões excedentes foram
-                bloqueadas automaticamente.
+                ⚠️ {t("host_capacity_reached", { plan: planName, limit: roomLimit })}
               </span>
               <Link
                 href="/planos"
                 className="px-3 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black whitespace-nowrap text-center"
               >
-                Ampliar Capacidade →
+                {t("host_upgrade")}
               </Link>
             </div>
           )}
@@ -1338,8 +1352,7 @@ function HostGameContent() {
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/25 text-purple-500 text-[11px] font-black mb-3">
               <span>👥</span>
               <span>
-                Limite da sala ({userPlan.label}): até{" "}
-                {formatLimitValue(maxRoomPlayers)} participantes
+                {t("host_capacity_limit", { plan: planName, limit: roomLimit })}
               </span>
             </div>
 
@@ -1353,7 +1366,7 @@ function HostGameContent() {
             <div className="space-y-4 text-left">
               <div>
                 <label className="text-xs font-bold opacity-80 block mb-1">
-                  Filtrar por Categoria:
+                  {t("host_category_filter")}
                 </label>
                 <select
                   value={selectedCategory}
@@ -1361,11 +1374,11 @@ function HostGameContent() {
                   className={`w-full border rounded-xl p-3 text-xs font-bold focus:outline-none cursor-pointer mb-2 ${styles.input}`}
                 >
                   <option value="all">
-                    📂 Todas as Categorias ({quizzes.length})
+                    📂 {t("host_all_categories", { count: number(quizzes.length) })}
                   </option>
                   {QUIZ_CATEGORIES.map((cat) => (
                     <option key={cat.id} value={cat.id}>
-                      {cat.icon} {cat.label}
+                      {cat.icon} {categoryLabel(cat.id, cat.label)}
                     </option>
                   ))}
                 </select>
@@ -1382,12 +1395,12 @@ function HostGameContent() {
                 >
                   {filteredQuizzes.length === 0 ? (
                     <option disabled value="">
-                      Nenhum quiz nesta categoria
+                      {t("host_empty_category")}
                     </option>
                   ) : (
                     filteredQuizzes.map((q) => (
                       <option key={q.id} value={q.id}>
-                        [{q.category || "Geral"}] {q.title}
+                        [{categoryLabel(q.category, q.category || t("host_general"))}] {q.title}
                       </option>
                     ))
                   )}
@@ -1408,7 +1421,7 @@ function HostGameContent() {
                   htmlFor="arenaToggle"
                   className="text-xs font-bold cursor-pointer select-none"
                 >
-                  ⚔️ Listar na Arena Pública (Qualquer aluno poderá aceder)
+                  ⚔️ {t("host_public_listing")}
                 </label>
               </div>
 
@@ -1439,7 +1452,7 @@ function HostGameContent() {
                   </span>
                   {session.is_public && (
                     <span className="text-[10px] bg-purple-500/20 text-purple-400 border border-purple-500/40 px-2 py-0.5 rounded-full font-bold">
-                      ⚔️ Arena Pública
+                      ⚔️ {t("host_public_arena")}
                     </span>
                   )}
                 </div>
@@ -1455,7 +1468,7 @@ function HostGameContent() {
                   className="px-4 py-3 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-extrabold rounded-xl shadow transition cursor-pointer flex items-center gap-1.5"
                 >
                   <span>☁️</span>
-                  <span>Nuvem</span>
+                  <span>{t("host_cloud_short")}</span>
                 </button>
                 <button
                   type="button"
@@ -1463,7 +1476,7 @@ function HostGameContent() {
                   className="px-4 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold rounded-xl shadow transition cursor-pointer flex items-center gap-1.5"
                 >
                   <span>🌡️</span>
-                  <span>Termômetro</span>
+                  <span>{t("host_pulse_short")}</span>
                 </button>
                 <button
                   type="button"
@@ -1472,8 +1485,7 @@ function HostGameContent() {
                 >
                   <span>📱</span>
                   <span>
-                    {t("qr_code_link") || "QR Code"} ({players.length}/
-                    {formatLimitValue(maxRoomPlayers)})
+                    {t("qr_code_link")} ({number(players.length)}/{roomLimit})
                   </span>
                 </button>
                 <button
@@ -1519,7 +1531,7 @@ function HostGameContent() {
                 <span
                   className={`border px-3 py-1 rounded-full text-xs font-bold ${styles.subBox}`}
                 >
-                  {players.length} / {formatLimitValue(maxRoomPlayers)}{" "}
+                  {number(players.length)} / {roomLimit}{" "}
                   {t("connected") || "conectados"}
                 </span>
               </div>
@@ -1545,7 +1557,7 @@ function HostGameContent() {
                         type="button"
                         onClick={() => handleKickPlayer(p.id, p.player_name)}
                         className="text-rose-500 hover:text-rose-700 hover:bg-rose-500/10 p-1 rounded-md opacity-60 hover:opacity-100 transition cursor-pointer ml-1"
-                        title="Expulsar da sala"
+                        title={t("host_remove_student")}
                       >
                         ✕
                       </button>
@@ -1571,17 +1583,17 @@ function HostGameContent() {
                 </span>
                 {activeQuestionType === "fill_blanks" && (
                   <span className="bg-amber-500/20 text-amber-500 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
-                    🧩 Completar Lacunas
+                    🧩 {t("host_fill_blanks")}
                   </span>
                 )}
                 {activeQuestionType === "sequence_order" && (
                   <span className="bg-indigo-500/20 text-indigo-400 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
-                    🔀 Ordenação Sequencial
+                    🔀 {t("host_sequence")}
                   </span>
                 )}
                 {activeQuestionType === "true_false" && (
                   <span className="bg-emerald-500/20 text-emerald-500 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
-                    ⚡ Verdadeiro ou Falso
+                    ⚡ {t("host_true_false")}
                   </span>
                 )}
               </div>
@@ -1592,11 +1604,11 @@ function HostGameContent() {
                   type="button"
                   onClick={() => setShowEntryModal(true)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-1.5 ${styles.neutralBtn}`}
-                  title="Exibir QR Code, PIN e contador de alunos ativos (Tecla Q)"
+                  title={t("host_qr_shortcut")}
                 >
                   <span>📱</span>
                   <span>
-                    QR Code ({players.length}/{formatLimitValue(maxRoomPlayers)})
+                    {t("host_qr_short")} ({number(players.length)}/{roomLimit})
                   </span>
                 </button>
 
@@ -1604,27 +1616,27 @@ function HostGameContent() {
                   type="button"
                   onClick={() => setShowWordCloudModal(true)}
                   className="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-cyan-600 hover:bg-cyan-500 text-white transition cursor-pointer flex items-center gap-1 shadow-sm"
-                  title="Abrir Nuvem de Palavras ao vivo com a turma"
+                  title={t("host_show_cloud")}
                 >
                   <span>☁️</span>
-                  <span>Nuvem</span>
+                  <span>{t("host_cloud_short")}</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setShowQuickPulseModal(true)}
                   className="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-amber-500 hover:bg-amber-400 text-slate-950 transition cursor-pointer flex items-center gap-1 shadow-sm"
-                  title="Abrir Termômetro de Compreensão da turma"
+                  title={t("host_show_pulse")}
                 >
                   <span>🌡️</span>
-                  <span>Termômetro</span>
+                  <span>{t("host_pulse_short")}</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={handlePrimaryAction}
                   className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 shadow-sm ${primaryBtn.style}`}
-                  title="Atalho: Espaço ou Enter"
+                  title={t("host_primary_shortcut")}
                 >
                   <span>{primaryBtn.icon}</span>
                   <span>{primaryBtn.label}</span>
@@ -1634,10 +1646,10 @@ function HostGameContent() {
                   type="button"
                   onClick={handleNextQuestion}
                   className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs rounded-xl transition flex items-center gap-1 cursor-pointer shadow-sm"
-                  title="Atalho: Seta Direita (→)"
+                  title={t("host_next_shortcut")}
                 >
                   <span>⏩</span>
-                  <span>Próxima</span>
+                  <span>{t("next_btn")}</span>
                 </button>
 
                 <span
@@ -1658,7 +1670,7 @@ function HostGameContent() {
               >
                 <img
                   src={activeQuestionObj.image_url}
-                  alt="Ilustração da Questão"
+                  alt={t("host_question_image")}
                   referrerPolicy="no-referrer"
                   crossOrigin="anonymous"
                   className="max-h-64 w-auto object-contain rounded-xl shadow-md"
@@ -1686,12 +1698,10 @@ function HostGameContent() {
                 className={`p-6 rounded-2xl border border-dashed text-center space-y-2 ${styles.subBox}`}
               >
                 <p className="text-xs font-extrabold text-amber-500 uppercase tracking-wider">
-                  🔒 Alternativas Ocultas
+                  🔒 {t("host_options_hidden")}
                 </p>
                 <p className="text-xs opacity-70">
-                  Clique em <strong>Liberar Respostas (Play)</strong> (ou
-                  pressione <strong>Espaço</strong>) para exibir as opções e
-                  iniciar o cronômetro.
+                  {t("host_options_hidden_help")}
                 </p>
               </div>
             ) : (
@@ -1700,7 +1710,7 @@ function HostGameContent() {
                   <div className="space-y-3">
                     {revealCorrectAnswer && (
                       <div className="p-4 rounded-xl bg-emerald-500/15 border-2 border-emerald-500 text-sm font-extrabold text-emerald-500 animate-in fade-in duration-200">
-                        ✅ Sequência Correta:{" "}
+                        ✅ {t("host_correct_sequence")}{" "}
                         {(activeOptionsData.correctSequence || []).join(
                           "  →  "
                         )}
@@ -1708,7 +1718,7 @@ function HostGameContent() {
                     )}
                     <div className="space-y-2">
                       <span className="text-xs font-bold opacity-70 block">
-                        Banco de Palavras Projetado aos Alunos:
+                        {t("host_word_bank")}
                       </span>
                       <div className="flex flex-wrap gap-2.5">
                         {(activeOptionsData.bank || []).map((word, idx) => (
@@ -1729,7 +1739,7 @@ function HostGameContent() {
                     {revealCorrectAnswer ? (
                       <>
                         <span className="text-xs font-extrabold text-emerald-500 block">
-                          ✅ Ordem Cronológica / Lógica Correta:
+                          ✅ {t("host_correct_order")}
                         </span>
                         {(activeOptionsData.correctOrder || []).map(
                           (step, idx) => (
@@ -1749,9 +1759,7 @@ function HostGameContent() {
                       <div
                         className={`p-5 rounded-xl border text-xs font-semibold opacity-75 text-center ${styles.subBox}`}
                       >
-                        🔀 Os alunos estão ordenando as{" "}
-                        {(activeOptionsData.correctOrder || []).length} etapas
-                        em seus dispositivos...
+                        🔀 {t("host_ordering_steps", { count: number(activeOptionsData.correctOrder?.length) })}
                       </div>
                     )}
                   </div>
@@ -1893,14 +1901,15 @@ function HostGameContent() {
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-inherit pb-6">
                 <div>
                   <span className="text-xs font-bold text-purple-500 uppercase tracking-widest block mb-1">
-                    Relatório Pedagógico da Turma
+                    {t("host_report")}
                   </span>
                   <h2 className="text-2xl font-black">
-                    Estatísticas Gerais da Partida
+                    {t("host_match_stats")}
                   </h2>
                   <p className="text-xs opacity-70 mt-1">
-                    PIN: <strong className="font-mono">{session?.pin}</strong> |{" "}
-                    {players.length} alunos | {questions.length} questões
+                    {t("host_report_summary", {
+                      pin: session?.pin, students: number(players.length), questions: number(questions.length),
+                    })}
                   </p>
                 </div>
 
@@ -1910,14 +1919,14 @@ function HostGameContent() {
                     onClick={handleExportCSV}
                     className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5 cursor-pointer"
                   >
-                    📊 Exportar CSV
+                    📊 {t("owner_visit_export")}
                   </button>
                   <button
                     type="button"
                     onClick={handlePrintPDF}
                     className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5 cursor-pointer"
                   >
-                    📄 Baixar / Imprimir PDF
+                    📄 {t("host_print")}
                   </button>
                 </div>
               </div>
@@ -1927,52 +1936,51 @@ function HostGameContent() {
                   className={`p-4 border rounded-2xl space-y-1 ${styles.subBox}`}
                 >
                   <span className="text-xs opacity-70 font-semibold">
-                    Taxa Global de Acerto
+                    {t("host_total_accuracy")}
                   </span>
                   <p className="text-2xl font-black text-emerald-500 font-mono">
                     {classAccuracyRate}%
                   </p>
                   <span className="text-[10px] opacity-60 block">
-                    {totalGlobalCorrect} de {totalGlobalAnswers} respostas
-                    corretas
+                    {t("host_correct_total", {
+                      correct: number(totalGlobalCorrect), total: number(totalGlobalAnswers),
+                    })}
                   </span>
                 </div>
 
                 <div className="p-4 border border-rose-500/30 bg-rose-500/5 rounded-2xl space-y-1">
                   <span className="text-xs text-rose-500 font-bold flex items-center gap-1">
-                    ⚠️ Questão Mais Desafiadora
+                    ⚠️ {t("host_hardest")}
                   </span>
                   {hardestQuestion ? (
                     <div>
                       <p className="text-sm font-black line-clamp-1">
-                        Q{hardestQuestion.index}: {hardestQuestion.text}
+                        {t("question")} {number(hardestQuestion.index)}: {hardestQuestion.text}
                       </p>
                       <span className="text-[11px] text-rose-500 font-bold font-mono">
-                        {hardestQuestion.errorRate}% de erro (
-                        {hardestQuestion.errorCount} erros)
+                        {t("host_rate_incorrect", { rate: number(hardestQuestion.errorRate), count: number(hardestQuestion.errorCount) })}
                       </span>
                     </div>
                   ) : (
-                    <p className="text-xs opacity-50">Sem dados</p>
+                    <p className="text-xs opacity-50">{t("host_no_data")}</p>
                   )}
                 </div>
 
                 <div className="p-4 border border-blue-500/30 bg-blue-500/5 rounded-2xl space-y-1">
                   <span className="text-xs text-blue-500 font-bold flex items-center gap-1">
-                    ✨ Questão Mais Fácil
+                    ✨ {t("host_easiest")}
                   </span>
                   {easiestQuestion ? (
                     <div>
                       <p className="text-sm font-black line-clamp-1">
-                        Q{easiestQuestion.index}: {easiestQuestion.text}
+                        {t("question")} {number(easiestQuestion.index)}: {easiestQuestion.text}
                       </p>
                       <span className="text-[11px] text-blue-500 font-bold font-mono">
-                        {easiestQuestion.accuracy}% de acerto (
-                        {easiestQuestion.correctCount} acertos)
+                        {t("host_rate_correct", { rate: number(easiestQuestion.accuracy), count: number(easiestQuestion.correctCount) })}
                       </span>
                     </div>
                   ) : (
-                    <p className="text-xs opacity-50">Sem dados</p>
+                    <p className="text-xs opacity-50">{t("host_no_data")}</p>
                   )}
                 </div>
               </div>
@@ -1984,11 +1992,10 @@ function HostGameContent() {
                       className={`p-5 border rounded-2xl space-y-3 ${styles.subBox}`}
                     >
                       <span className="text-xs font-black uppercase tracking-wider text-cyan-500 block">
-                        ☁️ Nuvem de Palavras ({wordCloudReport.totalSubmissions}{" "}
-                        envios)
+                        ☁️ {t("host_cloud")} • {t("host_submissions", { count: number(wordCloudReport.totalSubmissions) })}
                       </span>
                       <p className="text-xs font-bold opacity-80">
-                        Tema: &ldquo;{wordCloudReport.prompt}&rdquo;
+                        {t("host_topic")} &ldquo;{wordCloudReport.prompt}&rdquo;
                       </p>
                       <div className="flex flex-wrap gap-1.5">
                         {wordCloudReport.words.slice(0, 12).map((w) => (
@@ -1996,7 +2003,7 @@ function HostGameContent() {
                             key={w.word}
                             className="px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-500 text-xs font-extrabold"
                           >
-                            {w.word} ({w.count}x)
+                            {w.word} ({number(w.count)}×)
                           </span>
                         ))}
                       </div>
@@ -2008,11 +2015,10 @@ function HostGameContent() {
                       className={`p-5 border rounded-2xl space-y-3 ${styles.subBox}`}
                     >
                       <span className="text-xs font-black uppercase tracking-wider text-amber-500 block">
-                        🌡️ Termômetro da Turma (
-                        {quickPulseReport.totalResponses} votos)
+                        🌡️ {t("host_pulse")} • {t("host_votes_total", { count: number(quickPulseReport.totalResponses) })}
                       </span>
                       <p className="text-xs font-bold opacity-80">
-                        Pergunta: &ldquo;{quickPulseReport.question}&rdquo;
+                        {t("host_prompt")} &ldquo;{quickPulseReport.question}&rdquo;
                       </p>
                       <div className="space-y-2">
                         {quickPulseReport.stats.map((s) => (
@@ -2021,7 +2027,7 @@ function HostGameContent() {
                             className="flex justify-between text-xs font-bold"
                           >
                             <span>
-                              {s.icon} {s.label}
+                              {s.icon} {t(s.label)}
                             </span>
                             <span className="font-mono">
                               {s.percent}% ({s.count})
@@ -2036,17 +2042,17 @@ function HostGameContent() {
 
               <div className="space-y-3">
                 <h3 className="text-sm font-bold uppercase tracking-wider">
-                  Boletim Individual dos Alunos
+                  {t("host_individual_report")}
                 </h3>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
                     <thead>
                       <tr className="border-b border-inherit opacity-70">
-                        <th className="pb-3 font-bold">Posição</th>
-                        <th className="pb-3 font-bold">Aluno</th>
-                        <th className="pb-3 font-bold">Pontuação</th>
-                        <th className="pb-3 font-bold">Acertos</th>
-                        <th className="pb-3 font-bold">Precisão</th>
+                        <th className="pb-3 font-bold">{t("arena_rank")}</th>
+                        <th className="pb-3 font-bold">{t("host_student")}</th>
+                        <th className="pb-3 font-bold">{t("arena_score")}</th>
+                        <th className="pb-3 font-bold">{t("correct_hits")}</th>
+                        <th className="pb-3 font-bold">{t("host_accuracy")}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-inherit font-medium">
@@ -2113,7 +2119,7 @@ function HostGameContent() {
                   }}
                   className="w-full sm:w-auto bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-extrabold py-3 px-8 rounded-xl transition shadow-lg text-xs cursor-pointer flex items-center justify-center gap-2"
                 >
-                  <span>🔁</span> Jogar Novo Quiz com Esta Turma
+                  <span>🔁</span> {t("host_replay_group")}
                 </button>
 
                 <Link
@@ -2156,12 +2162,8 @@ function HostGameContent() {
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
                   <span>
                     {players.length === 0
-                      ? `Aguardando alunos (Máx: ${formatLimitValue(
-                          maxRoomPlayers
-                        )})...`
-                      : `${players.length} / ${formatLimitValue(
-                          maxRoomPlayers
-                        )} alunos ativos na sala`}
+                      ? t("host_waiting_capacity", { limit: roomLimit })
+                      : t("host_students_online", { count: number(players.length), limit: roomLimit })}
                   </span>
                 </div>
 
@@ -2262,18 +2264,17 @@ function HostGameContent() {
 
               <div>
                 <h3 className="text-xl font-bold flex items-center gap-2">
-                  <span>🎯</span> Próximo Quiz da Rodada
+                  <span>🎯</span> {t("host_next_quiz")}
                 </h3>
                 <p className="text-xs opacity-70 mt-1">
-                  Os <strong>{players.length} alunos</strong> conectados
-                  continuarão automaticamente nesta mesma sala.
+                  {t("host_same_students", { count: number(players.length) })}
                 </p>
               </div>
 
               <div className="space-y-4">
                 <div>
                   <label className="text-xs font-bold opacity-80 block mb-1">
-                    Escolha o Quiz:
+                    {t("host_choose_next")}
                   </label>
                   <select
                     value={nextQuizId}
@@ -2282,7 +2283,7 @@ function HostGameContent() {
                   >
                     {quizzes.map((q) => (
                       <option key={q.id} value={q.id}>
-                        [{q.category || "Geral"}] {q.title}
+                        [{q.category || t("host_general")}] {q.title}
                       </option>
                     ))}
                   </select>
@@ -2302,7 +2303,7 @@ function HostGameContent() {
                     htmlFor="resetScoresCheck"
                     className="text-xs font-bold cursor-pointer select-none"
                   >
-                    Zerar pontuações (desmarque para somar no placar geral)
+                    {t("host_reset_scores")}
                   </label>
                 </div>
 
@@ -2313,8 +2314,8 @@ function HostGameContent() {
                   className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold py-3.5 rounded-xl shadow-lg transition cursor-pointer text-sm"
                 >
                   {loading
-                    ? "Preparando nova rodada..."
-                    : "Começar Nova Partida 🚀"}
+                    ? t("host_preparing_round")
+                    : t("host_start_new")}
                 </button>
               </div>
             </div>
@@ -2353,11 +2354,12 @@ function HostGameContent() {
 }
 
 export default function HostGamePage() {
+  const { t } = useLanguage();
   return (
     <Suspense
       fallback={
         <div className="min-h-[calc(100vh-70px)] bg-slate-950 flex items-center justify-center text-white">
-          Carregando sala...
+          {t("host_loading_room")}
         </div>
       }
     >

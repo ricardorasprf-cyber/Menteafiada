@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { useLanguage } from "@/contexts/LanguageContext"; // 1. Importar o hook de idioma
+import { LANGUAGES } from "@/locales/interfaceCopy";
 
 export default function SettingsModal({ isOpen, onClose }) {
-  const { language, changeLanguage } = useLanguage(); // 2. Usar o contexto de idioma
+  const { language, changeLanguage, t } = useLanguage();
   
   const [bgMusic, setBgMusic] = useState(true);
   const [sfx, setSfx] = useState(true);
@@ -70,17 +71,18 @@ export default function SettingsModal({ isOpen, onClose }) {
           
           {/* 1. Selecionar Idioma */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-[var(--foreground)] opacity-80 uppercase tracking-wider block">
-              Idioma da Plataforma
+            <label htmlFor="platform-language" className="text-xs font-bold text-[var(--foreground)] opacity-80 uppercase tracking-wider block">
+              {t("language_menu")}
             </label>
             <select
+              id="platform-language"
               value={language}
               onChange={(e) => changeLanguage(e.target.value)}
               className="w-full bg-[var(--background)] border border-[var(--card-border)] rounded-xl p-3 text-sm font-semibold text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm cursor-pointer"
             >
-              <option value="pt">🇵🇹 Português</option>
-              <option value="en">🇬🇧 English</option>
-              <option value="es">🇪🇸 Español</option>
+              {LANGUAGES.map(({ code, locale, flag, name }) => (
+                <option key={code} value={code} lang={locale}>{flag} {name}</option>
+              ))}
             </select>
           </div>
 

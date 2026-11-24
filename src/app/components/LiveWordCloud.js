@@ -13,6 +13,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/lib/supabase";
 
 const CLOUD_PALETTE = [
@@ -32,9 +33,9 @@ export function LiveWordCloud({
   onClose,
   onWordsUpdate,
 }) {
-  const [promptQuestion, setPromptQuestion] = useState(
-    "Em uma palavra, qual é o conceito-chave até agora?"
-  );
+  const { t, locale } = useLanguage();
+  const [promptDraft, setPromptQuestion] = useState(null);
+  const promptQuestion = promptDraft ?? t("cloud_default");
   const [activePrompt, setActivePrompt] = useState(null);
   const [wordsList, setWordsList] = useState([]);
   const [studentInput, setStudentInput] = useState("");
@@ -164,10 +165,10 @@ export function LiveWordCloud({
         <div className="flex items-start justify-between gap-4 border-b border-[var(--card-border)] pb-4">
           <div>
             <span className="text-[10px] font-black uppercase tracking-widest text-cyan-500 bg-cyan-500/10 px-2.5 py-0.5 rounded-full border border-cyan-500/30">
-              ☁️ INTERAÇÃO AO VIVO • NUVEM DE PALAVRAS
+              ☁️ {t("cloud_live")}
             </span>
             <h2 className="text-xl md:text-2xl font-black mt-1.5">
-              {activePrompt || "Iniciar Nuvem de Palavras com a Turma"}
+              {activePrompt || t("cloud_start")}
             </h2>
           </div>
 
@@ -177,7 +178,7 @@ export function LiveWordCloud({
               onClick={activePrompt ? handleStopCloud : onClose}
               className="px-3 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-500 border border-rose-500/30 text-xs font-bold cursor-pointer"
             >
-              {activePrompt ? "Encerrar Nuvem ✕" : "Fechar ✕"}
+              {activePrompt ? t("cloud_stop") : `${t("host_close")} ✕`}
             </button>
           )}
         </div>
@@ -186,13 +187,13 @@ export function LiveWordCloud({
           <form onSubmit={handleStartCloud} className="space-y-4">
             <div>
               <label className="text-xs font-bold opacity-80 block mb-1.5">
-                Pergunta ou Tema Disparador para os Alunos:
+                {t("cloud_prompt_label")}
               </label>
               <input
                 type="text"
                 value={promptQuestion}
                 onChange={(e) => setPromptQuestion(e.target.value)}
-                placeholder="Ex.: Cite uma palavra que resume o tema estudado..."
+                placeholder={t("cloud_example")}
                 className="w-full bg-[var(--background)] border border-[var(--card-border)] rounded-xl p-3.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-cyan-500"
                 required
               />
@@ -202,7 +203,7 @@ export function LiveWordCloud({
               type="submit"
               className="w-full py-3.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-extrabold rounded-xl shadow-lg text-sm cursor-pointer transition"
             >
-              🚀 Projetar Nuvem de Palavras para Todos os Alunos
+              🚀 {t("cloud_project")}
             </button>
           </form>
         )}
@@ -218,8 +219,8 @@ export function LiveWordCloud({
                 disabled={submittedCount >= 3}
                 placeholder={
                   submittedCount >= 3
-                    ? "Você atingiu o limite de 3 envios"
-                    : "Digite uma palavra ou termo curto..."
+                    ? t("cloud_limit")
+                    : t("cloud_input")
                 }
                 className="flex-1 bg-[var(--background)] border border-[var(--card-border)] rounded-xl p-3.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-cyan-500"
               />
@@ -228,12 +229,11 @@ export function LiveWordCloud({
                 disabled={!studentInput.trim() || submittedCount >= 3}
                 className="px-6 py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold rounded-xl text-xs transition cursor-pointer disabled:opacity-50"
               >
-                Enviar Palavra 🚀
+                {t("cloud_submit")}
               </button>
             </div>
             <p className="text-[11px] opacity-60">
-              Envios realizados: <strong>{submittedCount}/3</strong> • As
-              palavras aparecem ao vivo na tela da turma.
+              {t("cloud_counter", { count: submittedCount.toLocaleString(locale) })}
             </p>
           </form>
         )}
@@ -244,7 +244,7 @@ export function LiveWordCloud({
               <div className="text-center space-y-2 opacity-60">
                 <span className="text-4xl block animate-bounce">☁️</span>
                 <p className="text-xs font-semibold">
-                  Aguardando as primeiras palavras dos participantes...
+                  {t("cloud_waiting")}
                 </p>
               </div>
             ) : (
@@ -274,10 +274,10 @@ export function LiveWordCloud({
         {activePrompt && (
           <div className="flex items-center justify-between text-xs opacity-70 pt-1">
             <span>
-              Total de contribuições recebidas:{" "}
+              {t("cloud_total")}{" "}
               <strong>{wordsList.length}</strong>
             </span>
-            <span>Palavras únicas: {aggregatedWords.length}</span>
+            <span>{t("cloud_unique")} {aggregatedWords.length}</span>
           </div>
         )}
       </div>

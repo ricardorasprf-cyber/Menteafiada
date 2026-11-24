@@ -20,6 +20,7 @@ import {
 } from '@clerk/nextjs';
 import { useTheme } from '@/app/components/ThemeProvider';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { LANGUAGES } from '@/locales/interfaceCopy';
 
 const HEADER_THEMES = {
   'theme-classic': {
@@ -92,12 +93,6 @@ const HEADER_THEMES = {
   },
 };
 
-const LANGUAGES = [
-  { code: 'pt', label: 'PT-BR', flag: 'BR' },
-  { code: 'en', label: 'EN', flag: 'US' },
-  { code: 'es', label: 'ES', flag: 'ES' },
-];
-
 export default function PlatformHeader() {
   const router = useRouter();
   const pathname = usePathname();
@@ -105,28 +100,21 @@ export default function PlatformHeader() {
   const { user } = useUser();
   const { signOut } = useClerk();
   const { theme, themeInfo, cyclePlatformTheme } = useTheme();
-  const langContext = useLanguage();
+  const { language: activeLangCode, changeLanguage, t: translate } = useLanguage();
 
   const t = HEADER_THEMES[theme] || HEADER_THEMES['theme-classic'];
 
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [langMenuOpen, setLangMenuOpen] = useState(false);
-  const [localLangCode, setLocalLangCode] = useState('pt');
 
   const userMenuRef = useRef(null);
   const langMenuRef = useRef(null);
 
-  const activeLangCode = langContext?.language || localLangCode;
   const activeLangObj =
     LANGUAGES.find((l) => l.code === activeLangCode) || LANGUAGES[0];
 
   const handleSelectLanguage = (code) => {
-    setLocalLangCode(code);
-    if (typeof langContext?.changeLanguage === 'function') {
-      langContext.changeLanguage(code);
-    } else if (typeof langContext?.setLanguage === 'function') {
-      langContext.setLanguage(code);
-    }
+    changeLanguage(code);
     setLangMenuOpen(false);
   };
 
@@ -134,7 +122,7 @@ export default function PlatformHeader() {
     user?.firstName ||
     user?.username ||
     user?.fullName?.split(' ')[0] ||
-    'Usuário';
+    translate('user_name_fallback');
 
   const userRole =
     user?.publicMetadata?.role ||
@@ -166,13 +154,13 @@ export default function PlatformHeader() {
   const getRoleBadgeInfo = (role, tier) => {
     if (role === 'owner') {
       return {
-        label: '👑 Proprietário',
+        label: `👑 ${translate('role_owner')}`,
         style: 'bg-amber-500/15 text-amber-600 border-amber-500/30',
       };
     }
     if (role === 'manager' || tier === 'institutional') {
       return {
-        label: '🏫 Gestor Institucional',
+        label: `🏫 ${translate('role_manager')}`,
         style: 'bg-cyan-500/15 text-cyan-600 border-cyan-500/30',
       };
     }
@@ -184,19 +172,19 @@ export default function PlatformHeader() {
       return {
         label:
           tier === 'creator_pro' || role === 'creator_pro'
-            ? '🚀 Educador Pro'
-            : '📝 Educador / Criador',
+            ? `🚀 ${translate('role_educator_pro')}`
+            : `📝 ${translate('role_educator')}`,
         style: 'bg-purple-500/15 text-purple-600 border-purple-500/30',
       };
     }
     if (role === 'student_pro' || tier === 'student_pro') {
       return {
-        label: '🎓 Aluno Pro',
+        label: `🎓 ${translate('role_student_pro')}`,
         style: 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30',
       };
     }
     return {
-      label: '🌱 Explorador (Grátis)',
+      label: `🌱 ${translate('role_explorer')}`,
       style: 'bg-slate-500/15 text-slate-500 border-slate-500/30',
     };
   };
@@ -249,13 +237,13 @@ export default function PlatformHeader() {
         {isHomePage ? (
           <>
             <a href="#arena" className={`transition-colors ${t.navLink}`}>
-              Arena Batalha
+              {translate('arena_nav')}
             </a>
             <a href="#como-jogar" className={`transition-colors ${t.navLink}`}>
-              Como Jogar?
+              {translate('how_to_play')}
             </a>
             <a href="#recursos" className={`transition-colors ${t.navLink}`}>
-              Diferenciais
+              {translate('features_nav')}
             </a>
             <button
               type="button"
@@ -263,7 +251,7 @@ export default function PlatformHeader() {
               className="transition-colors cursor-pointer flex items-center gap-1.5 text-amber-600 font-bold hover:opacity-80"
             >
               <span>💎</span>
-              <span>Planos</span>
+              <span>{translate('plans_nav')}</span>
             </button>
           </>
         ) : (
@@ -273,7 +261,7 @@ export default function PlatformHeader() {
               onClick={() => router.push('/')}
               className={`transition-colors cursor-pointer ${t.navLink}`}
             >
-              Início
+              {translate('home_nav')}
             </button>
             <button
               type="button"
@@ -282,7 +270,7 @@ export default function PlatformHeader() {
                 pathname?.startsWith('/arena') ? t.navLinkActive : t.navLink
               }`}
             >
-              Arena Batalha
+              {translate('arena_nav')}
             </button>
             <button
               type="button"
@@ -293,7 +281,7 @@ export default function PlatformHeader() {
                   : t.navLink
               }`}
             >
-              Meus Cursos
+              {translate('my_courses')}
             </button>
             <button
               type="button"
@@ -302,7 +290,7 @@ export default function PlatformHeader() {
                 pathname?.startsWith('/game/play') ? t.navLinkActive : t.navLink
               }`}
             >
-              Entrar por PIN
+              {translate('join_pin')}
             </button>
             <button
               type="button"
@@ -312,7 +300,7 @@ export default function PlatformHeader() {
               }`}
             >
               <span>💎</span>
-              <span>Planos</span>
+              <span>{translate('plans_nav')}</span>
             </button>
           </>
         )}
@@ -323,12 +311,12 @@ export default function PlatformHeader() {
         <button
           type="button"
           onClick={cyclePlatformTheme}
-          title="Clique para alternar entre Claro, Escuro, NEON e Papel (Sépia)"
+          title={translate('change_theme')}
           className={`flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-xl border text-xs font-bold whitespace-nowrap transition-all active:scale-95 cursor-pointer ${t.themeBtn}`}
         >
           <span className="text-sm leading-none">{themeInfo?.icon || '☀️'}</span>
           <span className="hidden xs:inline sm:inline">
-            {themeInfo?.label || 'Tema'}
+            {translate(`theme_${themeInfo?.shortKey || 'classic'}`)}
           </span>
         </button>
 
@@ -336,6 +324,8 @@ export default function PlatformHeader() {
           <button
             type="button"
             onClick={() => setLangMenuOpen((prev) => !prev)}
+            aria-label={translate('language_menu')}
+            aria-expanded={langMenuOpen}
             className={`flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-full border text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${t.pillButton}`}
           >
             <span className="text-[10px] font-extrabold text-emerald-600 bg-emerald-500/15 px-1.5 py-0.5 rounded">
@@ -367,6 +357,8 @@ export default function PlatformHeader() {
                 <button
                   key={lang.code}
                   type="button"
+                  lang={lang.locale}
+                  aria-pressed={activeLangCode === lang.code}
                   onClick={() => handleSelectLanguage(lang.code)}
                   className={`w-full flex items-center justify-between px-3.5 py-2 whitespace-nowrap transition-colors cursor-pointer ${
                     t.dropdownItem
@@ -380,7 +372,7 @@ export default function PlatformHeader() {
                     <span className="text-[10px] font-extrabold opacity-70">
                       {lang.flag}
                     </span>
-                    <span>{lang.label}</span>
+                    <span>{lang.name}</span>
                   </span>
                   {activeLangCode === lang.code && <span>✓</span>}
                 </button>
@@ -397,7 +389,7 @@ export default function PlatformHeader() {
               onClick={() => router.push('/sign-in')}
               className={`text-sm font-semibold whitespace-nowrap transition-colors px-3 sm:px-4 py-2 rounded-full cursor-pointer ${t.navLink}`}
             >
-              Entrar
+              {translate('sign_in_nav')}
             </button>
 
             <button
@@ -405,7 +397,7 @@ export default function PlatformHeader() {
               onClick={() => router.push('/sign-up')}
               className={`text-xs sm:text-sm font-semibold whitespace-nowrap px-4 sm:px-5 py-2 rounded-full active:scale-95 transition-all cursor-pointer ${t.primaryBtn}`}
             >
-              Criar Conta Grátis
+              {translate('sign_up_nav')}
             </button>
           </>
         )}
@@ -419,7 +411,7 @@ export default function PlatformHeader() {
               className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-full border text-sm font-semibold whitespace-nowrap shadow-sm transition-all cursor-pointer ${t.pillButton}`}
             >
               <span className="truncate max-w-[120px] sm:max-w-[180px]">
-                Olá, {userName}
+                {translate('hello')}, {userName}
               </span>
               <svg
                 className={`w-4 h-4 opacity-70 shrink-0 transition-transform duration-200 ${
@@ -444,7 +436,7 @@ export default function PlatformHeader() {
               >
                 <div className={`px-4 pb-3 border-b ${t.dropdownDivider}`}>
                   <p className="text-[10px] font-bold tracking-widest opacity-60 uppercase whitespace-nowrap">
-                    CONTA MENTEAFIADA
+                    {translate('account_title')}
                   </p>
                   <p className="text-base font-extrabold mt-0.5 truncate">
                     {userName}
@@ -466,7 +458,7 @@ export default function PlatformHeader() {
                         className={`w-full flex items-center gap-3 px-4 py-2 text-sm font-bold text-amber-600 whitespace-nowrap transition-colors cursor-pointer ${t.dropdownItem}`}
                       >
                         <span className="w-5 text-center shrink-0">👑</span>
-                        <span>Painel do Proprietário</span>
+                        <span>{translate('owner_panel')}</span>
                       </button>
                     )}
 
@@ -477,7 +469,7 @@ export default function PlatformHeader() {
                         className={`w-full flex items-center gap-3 px-4 py-2 text-sm font-bold text-cyan-600 whitespace-nowrap transition-colors cursor-pointer ${t.dropdownItem}`}
                       >
                         <span className="w-5 text-center shrink-0">🏫</span>
-                        <span>Painel Institucional</span>
+                        <span>{translate('manager_panel')}</span>
                       </button>
                     )}
 
@@ -489,7 +481,7 @@ export default function PlatformHeader() {
                           className={`w-full flex items-center gap-3 px-4 py-2 text-sm font-semibold text-emerald-600 whitespace-nowrap transition-colors cursor-pointer ${t.dropdownItem}`}
                         >
                           <span className="w-5 text-center shrink-0">🎬</span>
-                          <span>Estúdio de Cursos & PDFs</span>
+                          <span>{translate('creator_studio')}</span>
                         </button>
                         <button
                           type="button"
@@ -497,7 +489,7 @@ export default function PlatformHeader() {
                           className={`w-full flex items-center gap-3 px-4 py-2 text-sm font-semibold text-purple-600 whitespace-nowrap transition-colors cursor-pointer ${t.dropdownItem}`}
                         >
                           <span className="w-5 text-center shrink-0">📝</span>
-                          <span>Gerenciar Quizzes</span>
+                          <span>{translate('manage_quizzes')}</span>
                         </button>
                         <button
                           type="button"
@@ -505,7 +497,7 @@ export default function PlatformHeader() {
                           className={`w-full flex items-center gap-3 px-4 py-2 text-sm font-semibold text-indigo-600 whitespace-nowrap transition-colors cursor-pointer ${t.dropdownItem}`}
                         >
                           <span className="w-5 text-center shrink-0">🎮</span>
-                          <span>Criar Sala Ao Vivo</span>
+                          <span>{translate('create_live_room')}</span>
                         </button>
                       </>
                     )}
@@ -521,7 +513,7 @@ export default function PlatformHeader() {
                       className={`w-full flex items-center gap-3 px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${t.dropdownItem}`}
                     >
                       <span className="w-5 text-center shrink-0">🏠</span>
-                      <span>Página Inicial</span>
+                      <span>{translate('home_nav')}</span>
                     </button>
                   )}
 
@@ -531,7 +523,7 @@ export default function PlatformHeader() {
                     className={`w-full flex items-center gap-3 px-4 py-2 text-sm font-semibold text-indigo-600 whitespace-nowrap transition-colors cursor-pointer ${t.dropdownItem}`}
                   >
                     <span className="w-5 text-center shrink-0">⚔️</span>
-                    <span>Arena Mensal</span>
+                    <span>{translate('monthly_arena')}</span>
                   </button>
 
                   <button
@@ -540,7 +532,7 @@ export default function PlatformHeader() {
                     className={`w-full flex items-center gap-3 px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${t.dropdownItem}`}
                   >
                     <span className="w-5 text-center shrink-0">🔢</span>
-                    <span>Entrar por PIN</span>
+                    <span>{translate('join_pin')}</span>
                   </button>
 
                   <button
@@ -549,7 +541,7 @@ export default function PlatformHeader() {
                     className={`w-full flex items-center gap-3 px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${t.dropdownItem}`}
                   >
                     <span className="w-5 text-center shrink-0">🎓</span>
-                    <span>Meus Cursos & Materiais</span>
+                    <span>{translate('courses_materials')}</span>
                   </button>
 
                   <button
@@ -558,7 +550,7 @@ export default function PlatformHeader() {
                     className={`w-full flex items-center gap-3 px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${t.dropdownItem}`}
                   >
                     <span className="w-5 text-center shrink-0">🏅</span>
-                    <span>Minhas Conquistas</span>
+                    <span>{translate('my_achievements')}</span>
                   </button>
 
                   <button
@@ -568,7 +560,7 @@ export default function PlatformHeader() {
                   >
                     <span className="flex items-center gap-3 text-emerald-600">
                       <span className="w-5 text-center shrink-0">💎</span>
-                      <span>Planos & Assinaturas</span>
+                      <span>{translate('plans_subscriptions')}</span>
                     </span>
                     {!isPaidPlan && (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
@@ -583,7 +575,7 @@ export default function PlatformHeader() {
                     className={`w-full flex items-center gap-3 px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${t.dropdownItem}`}
                   >
                     <span className="w-5 text-center shrink-0">⚙️</span>
-                    <span>Configurações</span>
+                    <span>{translate('settings')}</span>
                   </button>
                 </div>
 
@@ -597,7 +589,7 @@ export default function PlatformHeader() {
                     className="w-full flex items-center gap-3 px-4 py-2 text-sm font-semibold text-rose-500 hover:bg-rose-500/10 whitespace-nowrap transition-colors cursor-pointer"
                   >
                     <span className="w-5 text-center shrink-0">🚪</span>
-                    <span>Sair da conta</span>
+                    <span>{translate('logout')}</span>
                   </button>
                 </div>
               </div>

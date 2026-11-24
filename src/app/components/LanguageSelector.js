@@ -2,15 +2,10 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useLanguage } from "@/contexts/LanguageContext";
-
-const LANGUAGES = [
-  { code: "pt", label: "PT-BR", flag: "🇧🇷", name: "Português" },
-  { code: "en", label: "EN", flag: "🇺🇸", name: "English" },
-  { code: "es", label: "ES", flag: "🇪🇸", name: "Español" },
-];
+import { LANGUAGES } from "@/locales/interfaceCopy";
 
 export default function LanguageSelector() {
-  const { language, changeLanguage } = useLanguage();
+  const { language, changeLanguage, t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -30,6 +25,9 @@ export default function LanguageSelector() {
     <div className="relative z-50" ref={dropdownRef}>
       {/* Botão Fixo no Cabeçalho Escuro */}
       <button
+        type="button"
+        aria-label={t("language_menu")}
+        aria-expanded={isOpen}
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 bg-slate-800/50 hover:bg-slate-800 py-2 px-3.5 rounded-full border border-slate-700 text-white text-xs font-bold transition-all cursor-pointer shadow-sm"
       >
@@ -52,6 +50,9 @@ export default function LanguageSelector() {
               return (
                 <button
                   key={lang.code}
+                  type="button"
+                  lang={lang.locale}
+                  aria-pressed={isSelected}
                   onClick={() => {
                     changeLanguage(lang.code);
                     setIsOpen(false);
