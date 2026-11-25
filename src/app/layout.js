@@ -2,17 +2,15 @@
  * ============================================================================
  * Plataforma Educacional MenteAfiada
  * Arquivo: src/app/layout.js
- * Objetivo: Layout raiz da aplicação com ClerkProvider configurado com
- * `proxyUrl` oficial (`https://menteafiada.vercel.app/__clerk`) em produção,
- * redirecionando todas as chamadas da Frontend API do Clerk através da rota
- * `/api/clerk-proxy` (via rewrite do `next.config.mjs`) e eliminando qualquer
- * tentativa de acesso ao subdomínio `clerk.menteafiada.vercel.app`.
+ * Objetivo: Layout raiz com acesso direto ao Clerk no domínio .net
+ * e suporte ao proxy legado com a chave anterior.
  * ============================================================================
  */
 
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ClerkProvider } from "@clerk/nextjs";
+import { parsePublishableKey } from "@clerk/shared/keys";
 import { ptBR } from "@clerk/localizations";
 import { ThemeProvider } from "@/app/components/ThemeProvider";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -39,11 +37,12 @@ export default function RootLayout({ children }) {
   const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
   const isProductionClerk = publishableKey.startsWith("pk_live_");
 
-  // Em produção com chave pk_live_, força o uso do Proxy Oficial configurado no Clerk Dashboard
-  // Em localhost (pk_test_), mantém undefined para funcionar em Development Mode sem proxy
-  const clerkProxyUrl = isProductionClerk
-    ? "https://menteafiada.vercel.app/__clerk"
-    : undefined;
+  const frontendApi = parsePublishableKey(publishableKey)?.frontendApi;
+  // A chave do domínio novo aponta para a Frontend API verificada por DNS.
+  const clerkProxyUrl =
+    isProductionClerk && frontendApi !== "clerk.menteafiada.net"
+      ? "https://menteafiada.vercel.app/__clerk"
+      : undefined;
 
   return (
     <ClerkProvider
