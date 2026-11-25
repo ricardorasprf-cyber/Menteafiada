@@ -22,6 +22,7 @@ const isPublicRoute = createRouteMatcher([
   "/api/game(.*)",
   "/api/quizzes/official(.*)",
   "/api/webhooks/clerk(.*)",
+  "/api/webhooks/mercado-pago",
   "/api/analytics/visits(.*)",
   "/api/cron/(.*)",
 ]);
