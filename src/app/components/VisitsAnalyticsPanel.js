@@ -47,6 +47,16 @@ const PANEL_STYLES = {
   },
 };
 
+function visitClerkIds(visit) {
+  return visit.clerk_ids ?? [visit.clerk_id];
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  const safeText = /^\s*[=+@-]|^[\t\r\n]/.test(text) ? `'${text}` : text;
+  return `"${safeText.replaceAll('"', '""')}"`;
+}
+
 export function VisitsAnalyticsPanel() {
   const { theme } = useTheme();
   const { t, locale } = useLanguage();
@@ -64,6 +74,7 @@ export function VisitsAnalyticsPanel() {
     updatedAt: null,
   });
   const [usersList, setUsersList] = useState([]);
+  const [onlineIds, setOnlineIds] = useState(() => new Set());
 
   const loadVisits = useCallback(async () => {
     setLoading(true);
@@ -96,30 +107,62 @@ export function VisitsAnalyticsPanel() {
     };
   }, [loadVisits]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    let pending = false;
+
+    async function loadPresence() {
+      if (document.visibilityState !== "visible" || pending) return;
+      pending = true;
+      try {
+        const res = await fetch("/api/analytics/visits?presence=1", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { onlineIds } = await res.json();
+        if (!controller.signal.aborted) setOnlineIds(new Set(onlineIds));
+      } catch {
+        if (!controller.signal.aborted) setOnlineIds(new Set());
+      } finally {
+        pending = false;
+      }
+    }
+
+    loadPresence();
+    const interval = window.setInterval(loadPresence, 15_000);
+    document.addEventListener("visibilitychange", loadPresence);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", loadPresence);
+    };
+  }, []);
+
   const handleExportCSV = () => {
     if (usersList.length === 0) {
       alert(t("owner_visit_export_empty"));
       return;
     }
 
-    let csv = "data:text/csv;charset=utf-8,";
-    csv += [
-      t("arena_rank"), t("owner_visit_user_name"), t("owner_email"), "Clerk ID",
+    const header = [
+      t("arena_rank"), t("owner_visit_user_name"), t("owner_email"), "Clerk IDs",
       t("owner_visit_count"), t("owner_visit_last"),
-    ].join(";") + "\n";
+    ];
 
-    usersList.forEach((u, idx) => {
+    const rows = usersList.map((u, idx) => {
       const lastDate = u.last_visited_at
         ? new Date(u.last_visited_at).toLocaleString(locale)
         : "";
-      csv += `${idx + 1};"${u.user_name || ""}";"${u.user_email || ""}";"${
-        u.clerk_id
-      }";${u.visit_count};"${lastDate}"\n`;
+      return [
+        idx + 1, u.user_name, u.user_email, visitClerkIds(u).join(", "),
+        u.visit_count, lastDate,
+      ];
     });
 
-    const encoded = encodeURI(csv);
+    const csv = [header, ...rows].map((row) => row.map(csvCell).join(";")).join("\r\n");
     const link = document.createElement("a");
-    link.setAttribute("href", encoded);
+    link.setAttribute("href", `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`);
     link.setAttribute(
       "download",
       `MenteAfiada_Visitacoes_${new Date().toISOString().slice(0, 10)}.csv`
@@ -142,7 +185,7 @@ export function VisitsAnalyticsPanel() {
 
   const filteredUsers = usersList.filter((u) => {
     if (!searchTerm.trim()) return true;
-    const q = searchTerm.toLowerCase();
+    const q = searchTerm.trim().toLowerCase();
     return (
       String(u.user_name || "")
         .toLowerCase()
@@ -150,9 +193,7 @@ export function VisitsAnalyticsPanel() {
       String(u.user_email || "")
         .toLowerCase()
         .includes(q) ||
-      String(u.clerk_id || "")
-        .toLowerCase()
-        .includes(q)
+      visitClerkIds(u).some((id) => id?.toLowerCase().includes(q))
     );
   });
 
@@ -300,9 +341,17 @@ export function VisitsAnalyticsPanel() {
                     {formatNumber(idx + 1)}
                   </td>
                   <td className="py-3 px-3 font-extrabold">
+                    {visitClerkIds(item).some((id) => onlineIds.has(id)) && (
+                      <span
+                        role="img"
+                        aria-label={t("owner_visit_online")}
+                        title={t("owner_visit_online")}
+                        className="mr-1.5 inline-block size-2 rounded-full bg-emerald-500"
+                      />
+                    )}
                     {item.user_name || t("owner_visit_authenticated")}
                     <span className="block text-[10px] font-mono font-normal opacity-50">
-                      {item.clerk_id}
+                      {visitClerkIds(item).join(", ")}
                     </span>
                   </td>
                   <td className="py-3 px-3 opacity-85">

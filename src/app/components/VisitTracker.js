@@ -17,7 +17,29 @@ import { useUser } from "@clerk/nextjs";
 export function VisitTracker() {
   const pathname = usePathname();
   const { user, isLoaded } = useUser();
+  const userId = user?.id;
   const lastTrackedSignature = useRef("");
+
+  useEffect(() => {
+    if (!isLoaded || !userId) return;
+
+    let lastSent = 0;
+    const sendPresence = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastSent < 30_000) return;
+      lastSent = now;
+      fetch("/api/analytics/presence", { method: "POST" }).catch(() => {});
+    };
+
+    sendPresence();
+    const interval = window.setInterval(sendPresence, 30_000);
+    document.addEventListener("visibilitychange", sendPresence);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", sendPresence);
+    };
+  }, [isLoaded, userId]);
 
   useEffect(() => {
     if (!isLoaded || !pathname) return;

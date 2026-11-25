@@ -86,7 +86,7 @@ export async function POST(req) {
 }
 
 // GET: Consulta os totais globais e a lista de visitas por usuário (RESTRITO A OWNER/ADMIN)
-export async function GET() {
+export async function GET(req) {
   try {
     const { userId, sessionClaims } = await auth();
     const sessionRole = sessionClaims?.metadata?.role || sessionClaims?.publicMetadata?.role;
@@ -103,6 +103,34 @@ export async function GET() {
       );
     }
 
+    if (new URL(req.url).searchParams.get("presence") === "1") {
+      if (process.env.VERCEL_ENV !== "production") return Response.json({ onlineIds: [] });
+
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!url || !key) return new Response(null, { status: 503 });
+
+      const supabase = createClient(url, key);
+      const cutoff = new Date(Date.now() - 120_000).toISOString();
+      const onlineIds = [];
+      const pageSize = 200;
+      let cursor;
+      while (true) {
+        const page = supabase
+          .from("site_user_presence")
+          .select("clerk_id")
+          .gt("last_seen_at", cutoff)
+          .order("clerk_id", { ascending: true })
+          .limit(pageSize);
+        const { data, error } = await (cursor ? page.gt("clerk_id", cursor) : page);
+        if (error) return new Response(null, { status: 503 });
+        onlineIds.push(...data.map((row) => row.clerk_id));
+        if (data.length < pageSize) break;
+        cursor = data.at(-1).clerk_id;
+      }
+      return Response.json({ onlineIds });
+    }
+
     const supabaseAdmin = getSupabaseAdmin();
     if (!supabaseAdmin) {
       return NextResponse.json(
@@ -117,15 +145,44 @@ export async function GET() {
       .eq("id", 1)
       .maybeSingle();
 
-    const { data: usersVisits, error: usersErr } = await supabaseAdmin
-      .from("user_visit_counts")
-      .select("*")
-      .order("visit_count", { ascending: false })
-      .limit(200);
+    const groups = new Map();
+    let cursor;
+    const pageSize = 200;
+    while (true) {
+      const page = supabaseAdmin
+        .from("user_visit_counts")
+        .select("clerk_id,user_name,user_email,visit_count,last_visited_at")
+        .order("clerk_id", { ascending: true })
+        .limit(pageSize);
+      const { data: rows, error } = await (cursor ? page.gt("clerk_id", cursor) : page);
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
 
-    if (usersErr) {
-      return NextResponse.json({ error: usersErr.message }, { status: 500 });
+      for (const row of rows) {
+        const email = row.user_email?.trim().toLowerCase();
+        const key = email ? `email:${email}` : `clerk:${row.clerk_id}`;
+        const group = groups.get(key);
+        const latest =
+          !group || Date.parse(row.last_visited_at) > Date.parse(group.last_visited_at)
+            ? row
+            : group;
+        const clerkIds = group?.clerk_ids ?? [];
+        clerkIds.push(row.clerk_id);
+        groups.set(key, {
+          clerk_id: latest.clerk_id,
+          clerk_ids: clerkIds,
+          user_name: latest.user_name,
+          user_email: email || null,
+          visit_count: (group?.visit_count ?? 0) + Number(row.visit_count),
+          last_visited_at: latest.last_visited_at,
+        });
+      }
+
+      if (rows.length < pageSize) break;
+      cursor = rows.at(-1).clerk_id;
     }
+    const users = [...groups.values()].sort((a, b) => b.visit_count - a.visit_count);
 
     return NextResponse.json({
       success: true,
@@ -133,10 +190,10 @@ export async function GET() {
         totalVisits: Number(globalMetrics?.total_visits || 0),
         authenticatedVisits: Number(globalMetrics?.authenticated_visits || 0),
         anonymousVisits: Number(globalMetrics?.anonymous_visits || 0),
-        uniqueLoggedUsers: (usersVisits || []).length,
+        uniqueLoggedUsers: users.length,
         updatedAt: globalMetrics?.updated_at || null,
       },
-      users: usersVisits || [],
+      users,
     });
   } catch (err) {
     console.error("[Visits API GET] Exceção:", err);
