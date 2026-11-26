@@ -18,7 +18,8 @@ import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/app/components/ThemeProvider";
-import { resolveUserPlan, formatLimitValue } from "@/lib/planLimits";
+import { formatLimitValue } from "@/lib/planLimits";
+import { usePixPlan } from "@/lib/usePixPlan";
 
 const CREATOR_THEMES = {
   "theme-classic": {
@@ -97,7 +98,7 @@ export default function CreatorCoursesStudioPage() {
     "free";
 
   // Resolução centralizada do plano comercial e cotas de cursos
-  const userPlan = resolveUserPlan(userRole, planTier);
+  const userPlan = usePixPlan(user?.id, userRole, planTier);
   const isOwner = userPlan.key === "owner";
   const canPublishCourses = userPlan.canCreateCourses;
 

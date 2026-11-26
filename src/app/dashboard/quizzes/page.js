@@ -22,7 +22,8 @@ import { useTheme } from "@/app/components/ThemeProvider";
 import AiQuizGeneratorModal from "@/app/components/AiQuizGeneratorModal";
 import ImportQuizModal from "@/app/components/ImportQuizModal";
 import { QUIZ_CATEGORIES } from "@/constants/categories";
-import { resolveUserPlan, formatLimitValue } from "@/lib/planLimits";
+import { formatLimitValue } from "@/lib/planLimits";
+import { usePixPlan } from "@/lib/usePixPlan";
 
 const QUIZZES_PAGE_STYLES = {
   "theme-classic": {
@@ -128,7 +129,7 @@ export default function ManageQuizzesPage() {
     user?.publicMetadata?.plan_tier ||
     user?.unsafeMetadata?.plan_tier ||
     "free";
-  const userPlan = resolveUserPlan(userRole, planTier);
+  const userPlan = usePixPlan(user?.id, userRole, planTier);
 
   const [quizzes, setQuizzes] = useState([]);
   const [myQuizCount, setMyQuizCount] = useState(0);

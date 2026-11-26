@@ -31,7 +31,7 @@ import LiveWordCloud from "@/app/components/LiveWordCloud";
 import QuickPulseOverlay from "@/app/components/QuickPulseOverlay";
 import { QUIZ_CATEGORIES } from "@/constants/categories";
 import { sounds } from "@/lib/soundEffects";
-import { resolveUserPlan } from "@/lib/planLimits";
+import { usePixPlan } from "@/lib/usePixPlan";
 
 const HOST_PLAN_KEYS = {
   free: "role_explorer", student_pro: "role_student_pro", creator_pro: "role_educator_pro",
@@ -176,7 +176,7 @@ function HostGameContent() {
     user?.publicMetadata?.plan_tier ||
     user?.unsafeMetadata?.plan_tier ||
     "free";
-  const userPlan = resolveUserPlan(userRole, planTier);
+  const userPlan = usePixPlan(user?.id, userRole, planTier);
   const maxRoomPlayers = userPlan.maxPlayersPerRoom;
   const planName = t(HOST_PLAN_KEYS[userPlan.key]);
   const roomLimit = maxRoomPlayers === Infinity ? t("shared_unlimited") : number(maxRoomPlayers);
