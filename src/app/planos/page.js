@@ -744,7 +744,10 @@ export default function PlansPage() {
             {pix?.status === "paid" && (
               <p role="status">{t("plans_pix_paid", { date: new Date(pix.accessUntil).toLocaleDateString(locale) })}</p>
             )}
-            {["expired", "canceled", "failed"].includes(pix?.status) && (
+            {pix?.status === "failed" && (
+              <p role="status">{t("plans_pix_failed")}</p>
+            )}
+            {["expired", "canceled"].includes(pix?.status) && (
               <p role="status">{t("plans_pix_closed")}</p>
             )}
 
