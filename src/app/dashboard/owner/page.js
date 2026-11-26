@@ -215,17 +215,16 @@ export default function OwnerDashboard() {
     }
 
     // 3. Busca transações financeiras reais (PIX / Cartão) liquidadas
-    const { data: txData, error: txErr } = await supabase
-      .from("payment_transactions")
-      .select("*")
-      .order("paid_at", { ascending: false })
-      .limit(200);
-
-    if (!txErr && txData) {
-      setTransactions(txData);
+    try {
+      const response = await fetch("/api/payments/owner", { cache: "no-store" });
+      if (!response.ok) throw new Error("Extrato indispon?vel.");
+      const { transactions } = await response.json();
+      setTransactions(transactions);
+    } catch {
+      setTransactions([]);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   // Helper para obter o preço mensal dinâmico de um papel
@@ -266,20 +265,21 @@ export default function OwnerDashboard() {
 
     try {
       for (const plan of plansConfig) {
-        const { error } = await supabase.from("subscription_plans").upsert({
-          id: plan.id,
-          role_key: plan.role_key,
-          name: plan.name,
-          regular_monthly_price: Number(plan.regular_monthly_price || 0),
-          monthly_price: Number(plan.monthly_price || 0),
-          annual_monthly_price: Number(plan.annual_monthly_price || 0),
-          max_quizzes: Number(plan.max_quizzes || 3),
-          max_players_per_room: Number(plan.max_players_per_room || 25),
-          updated_at: new Date().toISOString(),
+        const response = await fetch("/api/payments/owner", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: plan.id,
+            regular_monthly_price: Number(plan.regular_monthly_price || 0),
+            monthly_price: Number(plan.monthly_price || 0),
+            annual_monthly_price: Number(plan.annual_monthly_price || 0),
+            annual_total_price: plan.annual_total_price == null || plan.annual_total_price === ""
+              ? null : Number(plan.annual_total_price),
+          }),
         });
 
-        if (error) {
-          throw new Error(error.message);
+        if (!response.ok) {
+          throw new Error("Falha ao salvar o preço.");
         }
       }
 
@@ -425,32 +425,24 @@ export default function OwnerDashboard() {
     0
   );
 
-  const realCapitalizedNet = approvedTransactions.reduce(
-    (acc, t) => acc + Number(t.net_amount || t.gross_amount || 0),
-    0
-  );
+  const sumNet = (items) => items.some((item) => item.net_amount == null)
+    ? null : items.reduce((sum, item) => sum + Number(item.net_amount), 0);
+  const realCapitalizedNet = sumNet(approvedTransactions);
 
   const pixTransactions = approvedTransactions.filter(
     (t) => String(t.payment_method).toLowerCase() === "pix"
   );
 
-  const realPixTotal = pixTransactions.reduce(
-    (acc, t) => acc + Number(t.net_amount || t.gross_amount || 0),
-    0
-  );
+  const realPixTotal = sumNet(pixTransactions);
 
   const now = new Date();
-  const currentMonthRevenue = approvedTransactions
+  const currentMonthRevenue = sumNet(approvedTransactions
     .filter((t) => {
       const d = new Date(t.paid_at);
       return (
         d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
       );
-    })
-    .reduce(
-      (acc, t) => acc + Number(t.net_amount || t.gross_amount || 0),
-      0
-    );
+    }));
 
   const estimatedMRR = users.reduce((acc, u) => {
     const norm = normalizeUserRole(u.role);
@@ -658,7 +650,7 @@ export default function OwnerDashboard() {
                   💠 {t("owner_net_received")}
                 </span>
                 <p className="text-3xl font-black text-emerald-500">
-                  {formatBRL(realCapitalizedNet)}
+                  {realCapitalizedNet == null ? "—" : formatBRL(realCapitalizedNet)}
                 </p>
                 <span className="text-xs opacity-70 block">
                   {t("owner_settled_gross", {
@@ -674,7 +666,7 @@ export default function OwnerDashboard() {
                   ⚡ {t("owner_pix_received")}
                 </span>
                 <p className="text-3xl font-black text-cyan-500">
-                  {formatBRL(realPixTotal)}
+                  {realPixTotal == null ? "—" : formatBRL(realPixTotal)}
                 </p>
                 <span className="text-xs opacity-70 block">
                   {t("owner_pix_count", { count: formatNumber(pixTransactions.length) })}
@@ -688,7 +680,7 @@ export default function OwnerDashboard() {
                   📅 {t("owner_monthly_revenue")}
                 </span>
                 <p className="text-3xl font-black text-indigo-500">
-                  {formatBRL(currentMonthRevenue)}
+                  {currentMonthRevenue == null ? "—" : formatBRL(currentMonthRevenue)}
                 </p>
                 <span className="text-xs opacity-70 block">
                   {t("owner_estimated_revenue", { amount: formatBRL(estimatedMRR) })}
@@ -833,6 +825,21 @@ export default function OwnerDashboard() {
                         />
                       </div>
                     </div>
+                    {plan.id === "creator_pro" && (
+                      <label className="block mt-3 text-[11px] font-bold">
+                        {t("owner_annual_total_price")}
+                        <input
+                          type="number" min="0" step="0.01"
+                          value={plan.annual_total_price ?? ""}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setPlansConfig((previous) => previous.map((item) => item.id === plan.id
+                              ? { ...item, annual_total_price: value } : item));
+                          }}
+                          className={`block mt-1 w-full px-3 py-2 rounded-xl border text-xs ${styles.priceInput}`}
+                        />
+                      </label>
+                    )}
                   </div>
                 ))}
               </div>
@@ -908,10 +915,10 @@ export default function OwnerDashboard() {
                             {formatBRL(tx.gross_amount)}
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono text-rose-500">
-                            -{formatBRL(tx.gateway_fee)}
+                            {tx.gateway_fee == null ? "—" : `-${formatBRL(tx.gateway_fee)}`}
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono font-black text-emerald-500">
-                            {formatBRL(tx.net_amount)}
+                            {tx.net_amount == null ? "—" : formatBRL(tx.net_amount)}
                           </td>
                         </tr>
                       ))}

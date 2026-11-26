@@ -1,5 +1,6 @@
 // Portuguese, English, Spanish, French.
 export const ownerCopy = {
+  owner_annual_total_price: ["Total anual em R$ (vazio para usar a mensalidade × 12)", "Annual total in BRL (leave blank to use the monthly amount × 12)", "Total anual en BRL (deja en blanco para usar el importe mensual × 12)", "Total annuel en BRL (laisser vide pour utiliser le montant mensuel × 12)"],
   owner_title: ["Painel de Controle do Proprietário","Owner Control Panel","Panel de control del propietario","Tableau de bord du propriétaire"],
   owner_intro: ["Gestão centralizada de perfis, caixa real PIX, valores dos planos, salas ativas e visitações.","Manage profiles, PIX payments, plan prices, active rooms, and visits in one place.","Gestiona perfiles, cobros PIX, precios, salas activas y visitas en un solo lugar.","Gérez les profils, les paiements PIX, les tarifs, les salles actives et les visites au même endroit."],
   owner_profiles_plans: ["Perfis & Planos","Profiles and Plans","Perfiles y planes","Profils et offres"],

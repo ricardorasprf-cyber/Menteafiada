@@ -40,7 +40,13 @@ export async function POST(req) {
       sessionClaims?.publicMetadata?.plan_tier ||
       "free";
 
-    const plan = resolveUserPlan(userRole, planTier);
+    let plan = resolveUserPlan(userRole, planTier);
+    if (process.env.VERCEL_ENV === "production" &&
+        process.env.MERCADO_PAGO_PIX_ENABLED === "1" &&
+        ["free", "student_pro"].includes(plan.key)) {
+      const { getPixAccess } = await import("@/lib/pixCheckout");
+      if (await getPixAccess(userId)) plan = resolveUserPlan(userRole, "creator_pro");
+    }
 
     // 2. Bloqueio do perfil Explorador (Grátis) no Gerador IA
     if (!plan.canUseAiGenerator) {

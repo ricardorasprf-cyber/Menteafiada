@@ -95,3 +95,16 @@ padrão. Acrescente `--headless` à configuração do servidor para executar sem
 janela. A configuração local define `http://127.0.0.1:4317` como origem
 permitida. A lista de origens do MCP não constitui uma barreira de rede e
 não cobre redirecionamentos. O modo isolado abre um perfil temporário.
+
+## Publicação do Pix do Educador Pro anual
+
+1. Confirme que a conta do proprietário tem `publicMetadata.role = "owner"` no Clerk. Revise os privilégios efetivos sobre `subscription_plans` e `payment_transactions`.
+2. Com autorização, aplique somente `20261126120000_pix_checkout.sql`. Essa migração prepara a estrutura e preserva as permissões usadas pela versão atual do painel.
+3. Publique a versão que usa a rota de servidor para preços e extrato, com `MERCADO_PAGO_PIX_ENABLED` desligada. Confirme que o proprietário consegue consultar o extrato e salvar preços e que a rota recusa contas sem o papel de proprietário.
+4. Aplique `20261126121000_pix_payment_permissions.sql` com autorização separada. Repita a conferência do painel e verifique que os papéis do navegador perderam acesso direto ao extrato e à escrita de preços.
+5. Configure `MERCADO_PAGO_ACCESS_TOKEN` e `MERCADO_PAGO_WEBHOOK_SECRET` apenas no ambiente Production da Vercel. Configure **Order (Mercado Pago)** para `https://menteafiada.net/api/webhooks/mercado-pago` na aba Produção da aplicação do Mercado Pago. Depois habilite `MERCADO_PAGO_PIX_ENABLED=1` em publicação autorizada.
+6. Para o pagamento real autorizado, registre o valor original do campo **Total anual em R$**, configure R$ 1,00 e use uma conta controlada. Confira o webhook, um lançamento bruto de R$ 1,00 e o vencimento da conta. Restaure o campo ao valor anterior, inclusive se estiver vazio, e confira se ficou alguma ordem de R$ 1,00 em aberto.
+
+Antes da primeira cobrança real, uma falha na verificação do painel permite interromper a sequência antes da revogação de permissões. Se o problema surgir após a revogação, preserve o extrato protegido e corrija as rotas do painel antes de habilitar a emissão. Após uma cobrança real, preserve as ordens e o histórico financeiro durante qualquer recuperação.
+
+O teste SQL local usa somente PostgreSQL descartável. Execute `psql -X -v ON_ERROR_STOP=1 -f tests/sql/pix-checkout.sql` com conexão selecionada explicitamente para um banco local vazio e descartável.

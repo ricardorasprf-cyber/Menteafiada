@@ -252,7 +252,48 @@ export default function PlansPage() {
   const [plans, setPlans] = useState(INITIAL_PLANS_DATA);
   const [billingCycle, setBillingCycle] = useState("annual"); // 'monthly' | 'annual'
   const [selectedPlan, setSelectedPlan] = useState(null);
-  const [paymentMethod, setPaymentMethod] = useState("pix");
+  const [pixEnabled, setPixEnabled] = useState(false);
+  const [pix, setPix] = useState(null);
+  const [pixBusy, setPixBusy] = useState(false);
+  const [pixError, setPixError] = useState("");
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const controller = new AbortController();
+    fetch("/api/payments/pix", { cache: "no-store", signal: controller.signal })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => setPixEnabled(data?.enabled === true))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [user?.id]);
+
+  const annualTotal = (plan) => plan.annualTotal ?? plan.annualPrice * 12;
+  const canPayPix = pixEnabled && selectedPlan?.id === "creator_pro" && billingCycle === "annual";
+
+  async function submitPix() {
+    setPixBusy(true);
+    setPixError("");
+    try {
+      const response = await fetch("/api/payments/pix", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expectedCents: Math.round(annualTotal(selectedPlan) * 100),
+          orderId: pix?.status === "pending" ? pix.orderId : undefined,
+        }),
+      });
+      if (response.status === 409) {
+        setPixError(t("plans_pix_price_changed"));
+        return;
+      }
+      if (!response.ok) throw new Error();
+      setPix(await response.json());
+    } catch {
+      setPixError(t("plans_pix_error"));
+    } finally {
+      setPixBusy(false);
+    }
+  }
 
   // Sincroniza automaticamente com os preços configurados no Painel do Proprietário (subscription_plans)
   useEffect(() => {
@@ -276,6 +317,7 @@ export default function PlansPage() {
               annualPrice: Number(
                 dbMatch.annual_monthly_price ?? item.annualPrice
               ),
+              annualTotal: dbMatch.annual_total_price == null ? null : Number(dbMatch.annual_total_price),
             };
           })
         );
@@ -315,6 +357,8 @@ export default function PlansPage() {
       return;
     }
 
+    setPix(null);
+    setPixError("");
     setSelectedPlan(plan);
   };
 
@@ -398,7 +442,7 @@ export default function PlansPage() {
         <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
           {plans.map((plan) => {
             const activePrice =
-              billingCycle === "annual" ? plan.annualPrice : plan.monthlyPrice;
+              billingCycle === "annual" ? annualTotal(plan) / 12 : plan.monthlyPrice;
 
             return (
               <div
@@ -455,7 +499,7 @@ export default function PlansPage() {
                         </div>
                         {billingCycle === "annual" && (
                           <span className="text-[11px] text-emerald-500 font-bold block mt-0.5">
-                            {t("plans_annual_total", { amount: formatBRL(activePrice * 12) })}
+                            {t("plans_annual_total", { amount: formatBRL(annualTotal(plan)) })}
                           </span>
                         )}
                       </div>
@@ -636,7 +680,7 @@ export default function PlansPage() {
                 <span>
                   {formatBRL(
                     billingCycle === "annual"
-                      ? selectedPlan.annualPrice * 12
+                      ? annualTotal(selectedPlan)
                       : selectedPlan.monthlyPrice
                   )}
                   <span className="text-xs font-normal opacity-70">
@@ -651,35 +695,58 @@ export default function PlansPage() {
                 {t("plans_payment_method")}
               </label>
               <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod("pix")}
-                  className={`p-3 rounded-xl border text-xs font-bold transition cursor-pointer flex items-center justify-center gap-2 ${
-                    paymentMethod === "pix"
-                      ? "border-emerald-500 bg-emerald-500/15 text-emerald-500"
-                      : styles.subBox
-                  }`}
+                <div
+                  className="p-3 rounded-xl border border-emerald-500 bg-emerald-500/15 text-emerald-500 text-xs font-bold flex items-center justify-center gap-2"
                 >
                   <span>💠</span> {t("plans_pix")}
-                </button>
+                </div>
 
                 <button
                   type="button"
-                  onClick={() => setPaymentMethod("card")}
-                  className={`p-3 rounded-xl border text-xs font-bold transition cursor-pointer flex items-center justify-center gap-2 ${
-                    paymentMethod === "card"
-                      ? "border-indigo-500 bg-indigo-500/15 text-indigo-500"
-                      : styles.subBox
-                  }`}
+                  disabled
+                  className={`p-3 rounded-xl border text-xs font-bold cursor-not-allowed opacity-60 ${styles.subBox}`}
                 >
                   <span>💳</span> {t("plans_card")}
+                  <span className="block mt-1">{t("plans_card_soon")}</span>
                 </button>
               </div>
             </div>
 
-            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-600 dark:text-amber-300 leading-relaxed">
-              {t("plans_demo")}
-            </div>
+            {!canPayPix && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs">
+                {t("plans_demo")}
+              </div>
+            )}
+            {pixError && <p role="alert" className="text-sm">{pixError}</p>}
+            {pix?.status === "pending" && (
+              <div className="space-y-2 text-sm">
+                <p role="status">{t("plans_pix_waiting", { amount: formatBRL(pix.amount) })}</p>
+                {pix.image && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img className="mx-auto" width="160" height="160"
+                    src={`data:image/png;base64,${pix.image}`} alt="QR Code Pix" />
+                )}
+                {pix.code && (
+                  <label className="block">
+                    {t("plans_pix_code")}
+                    <input className="block w-full rounded border p-2" readOnly value={pix.code}
+                      onFocus={(event) => event.target.select()} />
+                    <button type="button" className="underline"
+                      onClick={() => navigator.clipboard.writeText(pix.code).catch(() => {
+                        setPixError(t("plans_pix_manual_copy"));
+                      })}>
+                      {t("plans_pix_copy")}
+                    </button>
+                  </label>
+                )}
+              </div>
+            )}
+            {pix?.status === "paid" && (
+              <p role="status">{t("plans_pix_paid", { date: new Date(pix.accessUntil).toLocaleDateString(locale) })}</p>
+            )}
+            {["expired", "canceled", "failed"].includes(pix?.status) && (
+              <p role="status">{t("plans_pix_closed")}</p>
+            )}
 
             <div className="flex gap-2.5">
               <button
@@ -692,16 +759,12 @@ export default function PlansPage() {
 
               <button
                 type="button"
-                onClick={() => {
-                  alert(t("plans_checkout_alert", {
-                    plan: displayPlanName(selectedPlan),
-                    method: t(paymentMethod === "pix" ? "plans_pix" : "plans_card"),
-                  }));
-                  setSelectedPlan(null);
-                }}
-                className={`flex-1 py-3 rounded-xl text-xs font-extrabold cursor-pointer ${styles.btnPrimary}`}
+                onClick={submitPix}
+                data-mp-checkout-cta="create-order"
+                disabled={!canPayPix || pixBusy || pix?.status === "paid"}
+                className={`flex-1 py-3 rounded-xl text-xs font-extrabold cursor-pointer disabled:opacity-50 ${styles.btnPrimary}`}
               >
-                {t("plans_payment_cta")}
+                {pixBusy ? t("plans_pix_loading") : pix?.status === "pending" ? t("plans_pix_verify") : t("plans_payment_cta")}
               </button>
             </div>
           </div>
