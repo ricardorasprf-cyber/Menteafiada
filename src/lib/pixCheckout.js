@@ -65,9 +65,22 @@ export async function requestPixOrder(charge) {
           transactions: { payments: [{ amount, payment_method: { id: "pix", type: "bank_transfer" } }] },
         }),
       });
-  if (!response.ok) throw new Error("Falha na Orders API.");
-  const order = await response.json();
-  if (!/^ORD[A-Z0-9]{1,77}$/i.test(order.id ?? "") ||
+  const failedCreation = !charge.order_id && response.status === 402;
+  if (!response.ok && !failedCreation) throw new Error("Falha na Orders API.");
+  const body = await response.json();
+  const order = failedCreation ? body?.data : body;
+  if (failedCreation && (
+    order?.status !== "failed" ||
+    (order.currency ?? order.currency_id) !== "BRL" ||
+    !/^0(?:\.00)?$/.test(String(order.total_paid_amount)) ||
+    !Array.isArray(order.transactions?.payments) || order.transactions.payments.length !== 1 ||
+    order.transactions.payments[0]?.status !== "failed" ||
+    Number(order.transactions.payments[0]?.amount) !== Number(amount) ||
+    order.transactions.payments[0]?.payment_method?.id !== "pix" ||
+    order.transactions.payments[0]?.payment_method?.type !== "bank_transfer"
+  )) throw new Error("Falha Pix sem ordem terminal verificável.");
+
+  if (!/^ORD[A-Z0-9]{1,77}$/i.test(order?.id ?? "") ||
       (charge.order_id && order.id !== charge.order_id) ||
       order.external_reference !== charge.reference || Number(order.total_amount) !== Number(amount)) {
     throw new Error("Ordem Pix incompatível com a cobrança.");

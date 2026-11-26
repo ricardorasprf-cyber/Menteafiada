@@ -34,6 +34,35 @@ test("a emissão usa o valor persistido e mantém a chave idempotente na repeti�
   assert.equal(requests[0][2].transactions.payments[0].amount, "1.00");
 });
 
+test("um 402 com ordem Pix terminal e sem valor pago é recuperado", async () => {
+  const order = {
+    id: "ORDSYNTHETIC", external_reference: reference, currency: "BRL",
+    status: "failed", total_amount: "1.00", total_paid_amount: "0.00",
+    transactions: { payments: [{
+      amount: "1.00", status: "failed", status_detail: "processing_error",
+      payment_method: { id: "pix", type: "bank_transfer" },
+    }] },
+  };
+  let data = order;
+  const api = await load({
+    env: { MERCADO_PAGO_ACCESS_TOKEN: "synthetic" },
+    fetch: async () => ({
+      ok: false, status: 402,
+      json: async () => ({ errors: [{ code: "failed" }], data }),
+    }),
+  });
+  const charge = { reference, amount: "1.00", payer_email: "buyer@example.test" };
+  assert.equal(await api.requestPixOrder(charge), order);
+  for (const incompatible of [
+    { external_reference: "other" }, { total_amount: "2.00" },
+    { total_paid_amount: "1.00" }, { status: "action_required" },
+  ]) {
+    data = { ...order, ...incompatible };
+    await assert.rejects(api.requestPixOrder(charge));
+  }
+  await assert.rejects(api.requestPixOrder({ ...charge, order_id: order.id }));
+});
+
 test("a confirmação só envia à RPC uma ordem Pix creditada com valores coerentes", async () => {
   const calls = [];
   const api = await load({

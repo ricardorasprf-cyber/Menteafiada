@@ -8,6 +8,7 @@ export const plansCopy = {
   plans_pix_copy: ["Copiar código Pix", "Copy Pix code", "Copiar código Pix", "Copier le code Pix"],
   plans_pix_paid: ["Pix confirmado. Educador Pro ativo até {date}.", "Pix confirmed. Educator Pro is active until {date}.", "Pix confirmado. Educador Pro activo hasta el {date}.", "Pix confirmé. Éducateur Pro actif jusqu’au {date}."],
   plans_pix_closed: ["A cobrança foi encerrada. Você pode gerar um novo Pix.", "The charge is closed. You can create a new Pix payment.", "El cobro se cerró. Puedes generar un nuevo Pix.", "Le paiement est clos. Vous pouvez créer un nouveau Pix."],
+  plans_pix_failed: ["O Mercado Pago não conseguiu gerar o Pix. Nenhum valor foi pago nesta tentativa.", "Mercado Pago could not create the Pix payment. No amount was paid on this attempt.", "Mercado Pago no pudo generar el Pix. No se pagó ningún importe en este intento.", "Mercado Pago n’a pas pu générer le paiement Pix. Aucun montant n’a été payé pour cette tentative."],
   plans_pix_loading: ["Consultando Pix…", "Checking Pix…", "Consultando Pix…", "Vérification du paiement Pix…"],
   plans_pix_verify: ["Verificar pagamento", "Check payment", "Verificar pago", "Vérifier le paiement"],
   plans_free_audience: ["Para alunos e professores conhecendo a plataforma","For students and teachers trying the platform","Para alumnos y docentes que quieren conocer la plataforma","Pour les élèves et enseignants qui découvrent la plateforme"],
