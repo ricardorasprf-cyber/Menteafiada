@@ -21,6 +21,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTheme } from "@/app/components/ThemeProvider";
 import { sounds } from "@/lib/soundEffects";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const PROFILE_STYLES = {
   "theme-classic": {
@@ -62,6 +63,7 @@ export default function CompletarPerfilPage() {
   const { user, isLoaded } = useUser();
   const router = useRouter();
   const { theme, themeInfo, cyclePlatformTheme } = useTheme();
+  const { t, locale } = useLanguage();
 
   const styles = PROFILE_STYLES[theme] || PROFILE_STYLES["theme-classic"];
 
@@ -123,17 +125,17 @@ export default function CompletarPerfilPage() {
   const getRoleBadge = (role) => {
     switch (role) {
       case "owner":
-        return { label: "👑 Proprietário", color: "text-amber-500 bg-amber-500/15 border-amber-500/30" };
+        return { label: t("profile_owner"), color: "text-amber-500 bg-amber-500/15 border-amber-500/30" };
       case "admin":
-        return { label: "🛡️ Administrador", color: "text-purple-500 bg-purple-500/15 border-purple-500/30" };
+        return { label: t("profile_admin"), color: "text-purple-500 bg-purple-500/15 border-purple-500/30" };
       case "manager":
-        return { label: "📊 Gestor", color: "text-indigo-500 bg-indigo-500/15 border-indigo-500/30" };
+        return { label: t("profile_manager"), color: "text-indigo-500 bg-indigo-500/15 border-indigo-500/30" };
       case "creator":
       case "educator":
       case "teacher":
-        return { label: "🎓 Educador / Criador", color: "text-cyan-500 bg-cyan-500/15 border-cyan-500/30" };
+        return { label: t("profile_creator"), color: "text-cyan-500 bg-cyan-500/15 border-cyan-500/30" };
       default:
-        return { label: "🚀 Participante", color: "text-emerald-500 bg-emerald-500/15 border-emerald-500/30" };
+        return { label: t("profile_participant"), color: "text-emerald-500 bg-emerald-500/15 border-emerald-500/30" };
     }
   };
 
@@ -154,7 +156,7 @@ export default function CompletarPerfilPage() {
     if (!birthDate) {
       setFeedbackMsg({
         type: "error",
-        text: "Por favor, informe a sua data de nascimento para validar o cadastro.",
+        text: "profile_birth_required",
       });
       return;
     }
@@ -163,7 +165,7 @@ export default function CompletarPerfilPage() {
     if (age === null || age < 5 || age > 120) {
       setFeedbackMsg({
         type: "error",
-        text: "Informe uma data de nascimento válida.",
+        text: "profile_birth_invalid",
       });
       return;
     }
@@ -186,15 +188,13 @@ export default function CompletarPerfilPage() {
       sounds.playCorrect();
       setFeedbackMsg({
         type: "success",
-        text: "✅ Perfil e preferências atualizados com sucesso!",
+        text: "profile_saved",
       });
     } catch (err) {
       console.error("[Completar Perfil Error]:", err);
       setFeedbackMsg({
         type: "error",
-        text:
-          "Não foi possível salvar os dados: " +
-          (err?.errors?.[0]?.message || err.message),
+        text: "profile_save_error",
       });
     } finally {
       setSaving(false);
@@ -217,15 +217,15 @@ export default function CompletarPerfilPage() {
         className={`min-h-[calc(100vh-70px)] flex items-center justify-center p-6 ${styles.mainBg}`}
       >
         <div className={`max-w-md w-full p-8 rounded-3xl border text-center space-y-4 ${styles.card}`}>
-          <h2 className="text-xl font-bold">Acesso Restrito</h2>
+          <h2 className="text-xl font-bold">{t("profile_restricted")}</h2>
           <p className="text-xs opacity-70">
-            Faça login na plataforma para gerenciar seu perfil e preferências.
+            {t("profile_login")}
           </p>
           <Link
             href="/"
             className={`inline-block px-6 py-3 rounded-xl text-xs font-bold ${styles.primaryBtn}`}
           >
-            Voltar ao Início
+            {t("profile_home_short")}
           </Link>
         </div>
       </div>
@@ -235,7 +235,7 @@ export default function CompletarPerfilPage() {
   const primaryEmail =
     user.primaryEmailAddress?.emailAddress ||
     user.emailAddresses?.[0]?.emailAddress ||
-    "Não informado";
+    t("profile_email_missing");
 
   return (
     <div
@@ -250,14 +250,13 @@ export default function CompletarPerfilPage() {
               className="text-xs font-bold opacity-70 hover:opacity-100 inline-flex items-center gap-1.5 mb-2"
             >
               <span>←</span>
-              <span>Voltar para a Página Inicial</span>
+              <span>{t("profile_home")}</span>
             </Link>
             <h1 className="text-3xl font-extrabold flex items-center gap-2.5">
-              <span>⚙️</span> Perfil & Preferências
+              <span>⚙️</span> {t("profile_title")}
             </h1>
             <p className="text-xs opacity-75 mt-1">
-              Gerencie sua identidade nas salas ao vivo, dados cadastrais e
-              preferências visuais da plataforma.
+              {t("profile_intro")}
             </p>
           </div>
 
@@ -298,7 +297,7 @@ export default function CompletarPerfilPage() {
                   : "bg-rose-500/10 border-rose-500/40 text-rose-500"
               }`}
             >
-              {feedbackMsg.text}
+              {t(feedbackMsg.text)}
             </div>
           )}
 
@@ -307,13 +306,13 @@ export default function CompletarPerfilPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs font-bold opacity-80 block mb-1.5">
-                  Nome (Exibido nas Salas e Rankings)
+                  {t("profile_first_name")}
                 </label>
                 <input
                   type="text"
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
-                  placeholder="Seu primeiro nome"
+                  placeholder={t("profile_first_hint")}
                   className={`w-full border rounded-xl p-3 text-sm font-semibold focus:outline-none focus:ring-2 ${styles.input}`}
                   required
                 />
@@ -321,13 +320,13 @@ export default function CompletarPerfilPage() {
 
               <div>
                 <label className="text-xs font-bold opacity-80 block mb-1.5">
-                  Sobrenome
+                  {t("profile_last_name")}
                 </label>
                 <input
                   type="text"
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
-                  placeholder="Seu sobrenome"
+                  placeholder={t("profile_last_hint")}
                   className={`w-full border rounded-xl p-3 text-sm font-semibold focus:outline-none focus:ring-2 ${styles.input}`}
                 />
               </div>
@@ -336,7 +335,7 @@ export default function CompletarPerfilPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs font-bold opacity-80 block mb-1.5">
-                  Data de Nascimento <span className="text-rose-500">*</span>
+                  {t("profile_birth_date")} <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="date"
@@ -347,20 +346,20 @@ export default function CompletarPerfilPage() {
                 />
                 {computedAge !== null && (
                   <span className="text-[11px] text-emerald-500 font-bold mt-1 block">
-                    ✓ Idade verificada: {computedAge} anos
+                    {t("profile_age", { age: computedAge.toLocaleString(locale) })}
                   </span>
                 )}
               </div>
 
               <div>
                 <label className="text-xs font-bold opacity-80 block mb-1.5">
-                  Instituição / Unidade / Turma (Opcional)
+                  {t("profile_institution")}
                 </label>
                 <input
                   type="text"
                   value={institution}
                   onChange={(e) => setInstitution(e.target.value)}
-                  placeholder="Ex.: PRF / Academia / Turma A"
+                  placeholder={t("profile_institution_hint")}
                   className={`w-full border rounded-xl p-3 text-sm font-semibold focus:outline-none focus:ring-2 ${styles.input}`}
                 />
               </div>
@@ -369,7 +368,7 @@ export default function CompletarPerfilPage() {
             {/* Preferências de Interface e Áudio */}
             <div className="pt-4 border-t border-inherit space-y-3">
               <h3 className="text-xs font-black uppercase tracking-wider opacity-75">
-                Preferências da Plataforma
+                {t("profile_preferences")}
               </h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -378,10 +377,10 @@ export default function CompletarPerfilPage() {
                 >
                   <div>
                     <span className="text-xs font-extrabold block">
-                      Tema Visual Ativo
+                      {t("profile_theme")}
                     </span>
                     <span className="text-[11px] opacity-70">
-                      {themeInfo.icon} {themeInfo.label}
+                      {themeInfo.icon} {t(theme.replace("-", "_"))}
                     </span>
                   </div>
                   <button
@@ -389,7 +388,7 @@ export default function CompletarPerfilPage() {
                     onClick={cyclePlatformTheme}
                     className={`px-3 py-1.5 rounded-xl border text-xs font-bold cursor-pointer transition ${styles.neutralBtn}`}
                   >
-                    Alternar
+                    {t("profile_toggle")}
                   </button>
                 </div>
 
@@ -398,10 +397,10 @@ export default function CompletarPerfilPage() {
                 >
                   <div>
                     <span className="text-xs font-extrabold block">
-                      Efeitos Sonoros (SFX)
+                      {t("profile_sound")}
                     </span>
                     <span className="text-[11px] opacity-70">
-                      {soundEnabled ? "🔊 Ativados nas partidas" : "🔇 Silenciados"}
+                      {soundEnabled ? t("profile_sound_on") : t("profile_sound_off")}
                     </span>
                   </div>
                   <button
@@ -409,7 +408,7 @@ export default function CompletarPerfilPage() {
                     onClick={handleToggleSoundPreference}
                     className={`px-3 py-1.5 rounded-xl border text-xs font-bold cursor-pointer transition ${styles.neutralBtn}`}
                   >
-                    {soundEnabled ? "Desativar" : "Ativar"}
+                    {soundEnabled ? t("profile_disable") : t("profile_enable")}
                   </button>
                 </div>
               </div>
@@ -421,7 +420,7 @@ export default function CompletarPerfilPage() {
                 onClick={() => router.push("/")}
                 className={`w-full sm:w-auto px-5 py-3 rounded-xl border text-xs font-bold cursor-pointer transition ${styles.neutralBtn}`}
               >
-                Cancelar
+                {t("profile_cancel")}
               </button>
 
               <button
@@ -429,7 +428,7 @@ export default function CompletarPerfilPage() {
                 disabled={saving}
                 className={`w-full sm:w-auto px-7 py-3 rounded-xl text-xs font-extrabold cursor-pointer transition disabled:opacity-50 ${styles.primaryBtn}`}
               >
-                {saving ? "Salvando..." : "💾 Salvar Alterações"}
+                {saving ? t("profile_saving") : t("profile_save")}
               </button>
             </div>
           </form>

@@ -1,6 +1,7 @@
 import { ownerCopy } from "./ownerCopy.js";
 import { plansCopy } from "./plansCopy.js";
 import { hostCopy } from "./hostCopy.js";
+import { profileCopy } from "./profileCopy.js";
 
 export const LANGUAGES = [
   { code: "pt", locale: "pt-BR", label: "PT-BR", flag: "🇧🇷", name: "Português" },
@@ -14,6 +15,7 @@ export const interfaceCopy = {
   ...ownerCopy,
   ...plansCopy,
   ...hostCopy,
+  ...profileCopy,
   language_menu: ["Selecionar idioma", "Select language", "Elegir idioma", "Choisir la langue"],
   home_nav: ["Início", "Home", "Inicio", "Accueil"],
   arena_nav: ["Arena Batalha", "Battle Arena", "Arena de Batallas", "Arène des défis"],
